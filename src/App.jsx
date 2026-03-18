@@ -38,52 +38,91 @@ const delay = ms => new Promise(r=>setTimeout(r,ms))
 
 // ── To Field with .abs suggestions ───────────────────────────────────────────
 function ToField({ value, onChange }) {
-  const isAddress = value.startsWith('0x') && value.length >= 6
-  const isName = value.length >= 2 && !value.startsWith('0x')
-  const showCard = isAddress || isName
+  const [info, setInfo] = useState(null)
+  const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    if (!value || value.length < 3) { setInfo(null); return }
+
+    const isAddress = value.startsWith('0x') && value.length >= 10
+
+    if (isAddress) {
+      setLoading(true)
+      fetch(`https://api.abscan.org/api?module=account&action=balance&address=${value}&apikey=YourApiKeyToken`)
+        .then(r => r.json())
+        .then(data => {
+          const ethBalance = data.result ? (parseInt(data.result) / 1e18).toFixed(4) : null
+          setInfo({
+            type: 'address',
+            display: value,
+            balance: ethBalance,
+            portalUrl: `https://portal.abs.xyz/profile/${value}`,
+            scanUrl: `https://abscan.org/address/${value}`
+          })
+        })
+        .catch(() => {
+          setInfo({
+            type: 'address',
+            display: value,
+            balance: null,
+            portalUrl: `https://portal.abs.xyz/profile/${value}`,
+            scanUrl: `https://abscan.org/address/${value}`
+          })
+        })
+        .finally(() => setLoading(false))
+    } else if (value.length >= 2) {
+      setInfo({
+        type: 'username',
+        display: value,
+        portalUrl: `https://portal.abs.xyz/profile/${value}`,
+        scanUrl: null
+      })
+    } else {
+      setInfo(null)
+    }
+  }, [value])
 
   return (
     <div className="to-field-wrap" style={{position:'relative',flex:1}}>
       <input
         value={value}
-        onChange={e => onChange(e.target.value)}
+        onChange={e => { onChange(e.target.value); setInfo(null) }}
         placeholder="0x address or portal username..."
         style={{width:'100%',background:'none',border:'none',outline:'none',color:'var(--text-primary)',fontFamily:'var(--font-main)',fontSize:'.88rem'}}
       />
-      {showCard && (
-        <div style={{
-          position:'absolute',top:'calc(100% + 8px)',left:0,right:0,
-          background:'var(--bg-card)',border:'1px solid var(--abs-green-border)',
-          borderRadius:'10px',overflow:'hidden',zIndex:999,
-          boxShadow:'0 8px 24px rgba(0,0,0,.5)'
-        }}>
+      {loading && (
+        <div style={{position:'absolute',top:'calc(100% + 8px)',left:0,right:0,background:'var(--bg-card)',border:'1px solid var(--abs-green-border)',borderRadius:'10px',padding:'12px 14px',zIndex:999,fontSize:'.8rem',color:'var(--text-muted)',fontFamily:'var(--font-mono)'}}>
+          ⏳ Looking up on Abstract...
+        </div>
+      )}
+      {info && !loading && (
+        <div style={{position:'absolute',top:'calc(100% + 8px)',left:0,right:0,background:'var(--bg-card)',border:'1px solid var(--abs-green-border)',borderRadius:'10px',overflow:'hidden',zIndex:999,boxShadow:'0 8px 24px rgba(0,0,0,.5)'}}>
           
-            href={`https://portal.abs.xyz/profile/${value}`}
-            target="_blank"
-            rel="noreferrer"
-            style={{textDecoration:'none',display:'flex',alignItems:'center',gap:'10px',padding:'12px 14px'}}
-          >
-            <div style={{
-              width:'32px',height:'32px',borderRadius:'50%',
-              background:'var(--abs-green-pale)',border:'1px solid var(--abs-green-border)',
-              display:'flex',alignItems:'center',justifyContent:'center',
-              fontSize:'.7rem',color:'var(--abs-green)',fontFamily:'var(--font-mono)',
-              fontWeight:'700',flexShrink:0
-            }}>
+          {/* Portal Profile Link */}
+          <a href={info.portalUrl} target="_blank" rel="noreferrer" style={{textDecoration:'none',display:'flex',alignItems:'center',gap:'10px',padding:'12px 14px',borderBottom: info.scanUrl ? '1px solid var(--border)' : 'none'}}>
+            <div style={{width:'32px',height:'32px',borderRadius:'50%',background:'var(--abs-green-pale)',border:'1px solid var(--abs-green-border)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'.7rem',color:'var(--abs-green)',fontFamily:'var(--font-mono)',fontWeight:'700',flexShrink:0}}>
               {value.startsWith('0x') ? value.slice(2,4).toUpperCase() : value.slice(0,2).toUpperCase()}
             </div>
             <div style={{flex:1}}>
-              <div style={{fontSize:'.85rem',fontWeight:'600',color:'var(--text-primary)',marginBottom:'2px'}}>
-                {value}
-              </div>
+              <div style={{fontSize:'.85rem',fontWeight:'600',color:'var(--text-primary)',marginBottom:'2px'}}>{value}</div>
               <div style={{fontSize:'.7rem',color:'var(--text-secondary)',fontFamily:'var(--font-mono)'}}>
-                View on Abstract Portal ↗
+                {info.balance !== null && info.balance !== undefined ? `${info.balance} ETH · ` : ''}View on Abstract Portal ↗
               </div>
             </div>
-            <div style={{fontSize:'.7rem',color:'var(--abs-green)',fontFamily:'var(--font-mono)'}}>
-              verify →
-            </div>
+            <div style={{fontSize:'.65rem',color:'var(--abs-green)',fontFamily:'var(--font-mono)'}}>portal ↗</div>
           </a>
+
+          {/* Abscan Link - only for addresses */}
+          {info.scanUrl && (
+            <a href={info.scanUrl} target="_blank" rel="noreferrer" style={{textDecoration:'none',display:'flex',alignItems:'center',gap:'10px',padding:'10px 14px'}}>
+              <div style={{width:'32px',height:'32px',borderRadius:'50%',background:'rgba(0,255,133,.04)',border:'1px solid var(--border)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'.8rem',flexShrink:0}}>⛓</div>
+              <div style={{flex:1}}>
+                <div style={{fontSize:'.82rem',fontWeight:'500',color:'var(--text-secondary)',marginBottom:'2px'}}>View on Abscan</div>
+                <div style={{fontSize:'.7rem',color:'var(--text-muted)',fontFamily:'var(--font-mono)'}}>Check transactions & activity</div>
+              </div>
+              <div style={{fontSize:'.65rem',color:'var(--text-muted)',fontFamily:'var(--font-mono)'}}>abscan ↗</div>
+            </a>
+          )}
         </div>
       )}
     </div>
