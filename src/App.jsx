@@ -38,51 +38,56 @@ const delay = ms => new Promise(r=>setTimeout(r,ms))
 
 // ── To Field with .abs suggestions ───────────────────────────────────────────
 function ToField({ value, onChange }) {
-  const [suggestions, setSuggestions] = useState([])
-  const [show, setShow] = useState(false)
-  const ref = useRef(null)
+  const [profile, setProfile] = useState(null)
 
   useEffect(() => {
-    if (value.length < 1) { setSuggestions([]); setShow(false); return }
-    const q = value.toLowerCase()
-    const matches = ABS_DIRECTORY.filter(u =>
-      u.name.toLowerCase().includes(q) || u.addr.toLowerCase().includes(q)
-    )
-    setSuggestions(matches)
-    setShow(matches.length > 0)
+    if (!value || value.length < 3) { setProfile(null); return }
+    // Show portal profile link for any address or username
+    const isAddress = value.startsWith('0x') && value.length >= 10
+    const isName = value.length >= 3 && !value.startsWith('0x')
+    if (isAddress || isName) {
+      setProfile({
+        display: value,
+        url: `https://portal.abs.xyz/profile/${value}`
+      })
+    } else {
+      setProfile(null)
+    }
   }, [value])
 
-  useEffect(() => {
-    const handler = e => { if (ref.current && !ref.current.contains(e.target)) setShow(false) }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
-  }, [])
-
   return (
-    <div className="to-field-wrap" ref={ref}>
+    <div className="to-field-wrap">
       <input
         value={value}
         onChange={e => onChange(e.target.value)}
-        placeholder="0x address or .abs name..."
-        onFocus={() => suggestions.length > 0 && setShow(true)}
+        placeholder="0x address or portal username..."
       />
-      {show && (
+      {profile && (
         <div className="suggestions">
-          {suggestions.map(u => (
-            <div key={u.addr} className="suggestion-item" onClick={() => { onChange(u.name); setShow(false) }}>
-              <div className="suggestion-avatar">{u.initials}</div>
-              <div>
-                <div className="suggestion-name">{u.name}</div>
-                <div className="suggestion-addr">{shortAddr(u.addr)}</div>
+          
+            href={profile.url}
+            target="_blank"
+            rel="noreferrer"
+            style={{textDecoration:'none'}}
+          >
+            <div className="suggestion-item">
+              <div className="suggestion-avatar">
+                {value.startsWith('0x') ? value.slice(2,4).toUpperCase() : value.slice(0,2).toUpperCase()}
+              </div>
+              <div style={{flex:1}}>
+                <div className="suggestion-name">{value}</div>
+                <div className="suggestion-addr">View on Abstract Portal ↗</div>
+              </div>
+              <div style={{fontSize:'.7rem',color:'var(--abs-green)',fontFamily:'var(--font-mono)'}}>
+                verify →
               </div>
             </div>
-          ))}
+          </a>
         </div>
       )}
     </div>
   )
 }
-
 // ── Compose Modal ─────────────────────────────────────────────────────────────
 function ComposeModal({ onClose, onSend, defaultTo='' }) {
   const [to, setTo] = useState(defaultTo)
