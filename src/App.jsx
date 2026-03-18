@@ -38,49 +38,50 @@ const delay = ms => new Promise(r=>setTimeout(r,ms))
 
 // ── To Field with .abs suggestions ───────────────────────────────────────────
 function ToField({ value, onChange }) {
-  const [profile, setProfile] = useState(null)
-
-  useEffect(() => {
-    if (!value || value.length < 3) { setProfile(null); return }
-    // Show portal profile link for any address or username
-    const isAddress = value.startsWith('0x') && value.length >= 10
-    const isName = value.length >= 3 && !value.startsWith('0x')
-    if (isAddress || isName) {
-      setProfile({
-        display: value,
-        url: `https://portal.abs.xyz/profile/${value}`
-      })
-    } else {
-      setProfile(null)
-    }
-  }, [value])
+  const isAddress = value.startsWith('0x') && value.length >= 6
+  const isName = value.length >= 2 && !value.startsWith('0x')
+  const showCard = isAddress || isName
 
   return (
-    <div className="to-field-wrap">
+    <div className="to-field-wrap" style={{position:'relative',flex:1}}>
       <input
         value={value}
         onChange={e => onChange(e.target.value)}
         placeholder="0x address or portal username..."
+        style={{width:'100%',background:'none',border:'none',outline:'none',color:'var(--text-primary)',fontFamily:'var(--font-main)',fontSize:'.88rem'}}
       />
-      {profile && (
-        <div className="suggestions">
+      {showCard && (
+        <div style={{
+          position:'absolute',top:'calc(100% + 8px)',left:0,right:0,
+          background:'var(--bg-card)',border:'1px solid var(--abs-green-border)',
+          borderRadius:'10px',overflow:'hidden',zIndex:999,
+          boxShadow:'0 8px 24px rgba(0,0,0,.5)'
+        }}>
           
-            href={profile.url}
+            href={`https://portal.abs.xyz/profile/${value}`}
             target="_blank"
             rel="noreferrer"
-            style={{textDecoration:'none'}}
+            style={{textDecoration:'none',display:'flex',alignItems:'center',gap:'10px',padding:'12px 14px'}}
           >
-            <div className="suggestion-item">
-              <div className="suggestion-avatar">
-                {value.startsWith('0x') ? value.slice(2,4).toUpperCase() : value.slice(0,2).toUpperCase()}
+            <div style={{
+              width:'32px',height:'32px',borderRadius:'50%',
+              background:'var(--abs-green-pale)',border:'1px solid var(--abs-green-border)',
+              display:'flex',alignItems:'center',justifyContent:'center',
+              fontSize:'.7rem',color:'var(--abs-green)',fontFamily:'var(--font-mono)',
+              fontWeight:'700',flexShrink:0
+            }}>
+              {value.startsWith('0x') ? value.slice(2,4).toUpperCase() : value.slice(0,2).toUpperCase()}
+            </div>
+            <div style={{flex:1}}>
+              <div style={{fontSize:'.85rem',fontWeight:'600',color:'var(--text-primary)',marginBottom:'2px'}}>
+                {value}
               </div>
-              <div style={{flex:1}}>
-                <div className="suggestion-name">{value}</div>
-                <div className="suggestion-addr">View on Abstract Portal ↗</div>
+              <div style={{fontSize:'.7rem',color:'var(--text-secondary)',fontFamily:'var(--font-mono)'}}>
+                View on Abstract Portal ↗
               </div>
-              <div style={{fontSize:'.7rem',color:'var(--abs-green)',fontFamily:'var(--font-mono)'}}>
-                verify →
-              </div>
+            </div>
+            <div style={{fontSize:'.7rem',color:'var(--abs-green)',fontFamily:'var(--font-mono)'}}>
+              verify →
             </div>
           </a>
         </div>
