@@ -22,47 +22,148 @@ const delay = ms => new Promise(r=>setTimeout(r,ms))
 
 function ToField({ value, onChange }) {
   const [info, setInfo] = useState(null)
+  const [loading, setLoading] = useState(false)
   const [focused, setFocused] = useState(false)
+
+  // Abstract's Privy App ID — this is what abstrack.fun uses
+  const ABSTRACT_PRIVY_APP_ID = 'clpispdty00yfmi08jf7pi18p'
 
   useEffect(() => {
     setInfo(null)
     if (!value || value.length < 2) return
 
+    const isAddress = value.startsWith('0x') && value.length >= 10
+    const isUsername = !value.startsWith('0x') && value.length >= 2
+
     const timer = setTimeout(async () => {
+      setLoading(true)
       try {
-        // Try Portal API — works for both address and username
-        const res = await fetch(`https://portal.abs.xyz/api/users/${value}`)
+        // This is the same API abstrack.fun calls
+        const endpoint = isAddress
+          ? `https://auth.privy.io/api/v1/users/address/${value}`
+          : `https://auth.privy.io/api/v1/users/username/${value}`
+
+        const res = await fetch(endpoint, {
+          headers: {
+            'privy-app-id': ABSTRACT_PRIVY_APP_ID,
+            'Content-Type': 'application/json',
+          }
+        })
+
         if (res.ok) {
           const data = await res.json()
-          if (data && (data.username || data.address)) {
-            setInfo({
-              username: data.username || null,
-              address: data.address || value,
-              avatar: data.avatar || null,
-              portalUrl: `https://portal.abs.xyz/profile/${data.username || data.address || value}`,
-              scanUrl: `https://abscan.org/address/${data.address || value}`
-            })
-            return
-          }
-        }
-      } catch(e) {}
+          const wallet = data.linked_accounts?.find(a => a.type === 'wallet' || a.type === 'smart_wallet')
+          const username = data.linked_accounts?.find(a => a.type === 'username' || a.type === 'farcaster')
+          const avatar = data.linked_accounts?.find(a => a.profile_picture_url)?.profile_picture_url || null
+          const addr = wallet?.address || (isAddress ? value : null)
+          const name = username?.username || data.username || (isUsername ? value : null)
 
-      // Fallback — just show portal link for anything typed
-      const isAddress = value.startsWith('0x') && value.length >= 10
-      const isName = !value.startsWith('0x') && value.length >= 2
-      if (isAddress || isName) {
+          setInfo({
+            username: name,
+            address: addr,
+            avatar,
+            portalUrl: `https://portal.abs.xyz/profile/${name || addr || value}`,
+            scanUrl: addr ? `https://abscan.org/address/${addr}` : null,
+            found: true
+          })
+        } else {
+          // Not found via Privy — show fallback portal link
+          setInfo({
+            username: isUsername ? value : null,
+            address: isAddress ? value : null,
+            avatar: null,
+            portalUrl: `https://portal.abs.xyz/profile/${value}`,
+            scanUrl: isAddress ? `https://abscan.org/address/${value}` : null,
+            found: false
+          })
+        }
+      } catch(e) {
         setInfo({
-          username: isName ? value : null,
+          username: isUsername ? value : null,
           address: isAddress ? value : null,
           avatar: null,
           portalUrl: `https://portal.abs.xyz/profile/${value}`,
-          scanUrl: isAddress ? `https://abscan.org/address/${value}` : null
+          scanUrl: isAddress ? `https://abscan.org/address/${value}` : null,
+          found: false
         })
+      } finally {
+        setLoading(false)
       }
     }, 500)
 
     return () => clearTimeout(timer)
   }, [value])
+
+  const initials = value.startsWith('0x')
+    ? value.slice(2,4).toUpperCase()
+    : value.slice(0,2).toUpperCase()
+
+  const show = focused && (loading || info)
+
+  return (
+    <div className="to-field-wrap">
+      <input
+        value={value}
+        onChange={e => { onChange(e.target.value); setInfo(null) }}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setTimeout(() => { setFocused(false); setInfo(null) }, 200)}
+        placeholder="0x address or portal username..."
+      />
+      {show && loading && (
+        <div style={{position:'absolute',top:'calc(100% + 6px)',left:0,right:0,background:'var(--bg-card)',border:'1px solid var(--abs-green-border)',borderRadius:'10px',padding:'12px 14px',zIndex:9999,fontSize:'.78rem',color:'var(--text-muted)',fontFamily:'var(--font-mono)',display:'flex',alignItems:'center',gap:'8px'}}>
+          <div style={{width:'8px',height:'8px',borderRadius:'50%',background:'var(--abs-green)',animation:'blink .8s infinite'}}/>
+          Looking up on Abstract...
+        </div>
+      )}
+      {show && info && !loading && (
+        <div style={{position:'absolute',top:'calc(100% + 6px)',left:0,right:0,background:'var(--bg-card)',border:'1px solid var(--abs-green-border)',borderRadius:'10px',overflow:'hidden',zIndex:9999,boxShadow:'0 8px 24px rgba(0,0,0,.6)',animation:'fadeInUp .15s ease'}}>
+          
+          {/* Found badge */}
+          {info.found && (
+            <div style={{padding:'4px 14px',background:'rgba(0,255,133,.06)',borderBottom:'1px solid var(--border)',fontSize:'.65rem',color:'var(--abs-green)',fontFamily:'var(--font-mono)',letterSpacing:'.05em'}}>
+              ✦ ABSTRACT PORTAL USER FOUND
+            </div>
+          )}
+
+          {/* Profile row */}
+          <a href={info.portalUrl} target="_blank" rel="noreferrer"
+            style={{textDecoration:'none',display:'flex',alignItems:'center',gap:'12px',padding:'12px 14px',borderBottom:info.scanUrl?'1px solid var(--border)':'none'}}>
+            <div style={{width:'38px',height:'38px',borderRadius:'50%',overflow:'hidden',flexShrink:0,border:'1px solid var(--abs-green-border)'}}>
+              {info.avatar
+                ? <img src={info.avatar} alt="" style={{width:'100%',height:'100%',objectFit:'cover'}}/>
+                : <div style={{width:'100%',height:'100%',background:'var(--abs-green-pale)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'.72rem',color:'var(--abs-green)',fontFamily:'var(--font-mono)',fontWeight:'700'}}>
+                    {initials}
+                  </div>
+              }
+            </div>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{fontSize:'.88rem',fontWeight:'600',color:'var(--text-primary)',marginBottom:'3px',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+                {info.username || value}
+              </div>
+              <div style={{fontSize:'.7rem',color:'var(--text-secondary)',fontFamily:'var(--font-mono)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+                {info.address ? `${info.address.slice(0,8)}...${info.address.slice(-4)}` : 'View on Abstract Portal'} ↗
+              </div>
+            </div>
+            <div style={{fontSize:'.65rem',color:'var(--abs-green)',fontFamily:'var(--font-mono)',flexShrink:0}}>portal ↗</div>
+          </a>
+
+          {/* Abscan row */}
+          {info.scanUrl && (
+            <a href={info.scanUrl} target="_blank" rel="noreferrer"
+              style={{textDecoration:'none',display:'flex',alignItems:'center',gap:'12px',padding:'10px 14px'}}>
+              <div style={{width:'38px',height:'38px',borderRadius:'50%',background:'rgba(0,255,133,.04)',border:'1px solid var(--border)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'1rem',flexShrink:0}}>⛓</div>
+              <div style={{flex:1}}>
+                <div style={{fontSize:'.82rem',fontWeight:'500',color:'var(--text-secondary)',marginBottom:'2px'}}>View on Abscan</div>
+                <div style={{fontSize:'.7rem',color:'var(--text-muted)',fontFamily:'var(--font-mono)'}}>Transactions & on-chain activity</div>
+              </div>
+              <div style={{fontSize:'.65rem',color:'var(--text-muted)',fontFamily:'var(--font-mono)',flexShrink:0}}>abscan ↗</div>
+            </a>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
 
   const initials = value.startsWith('0x')
     ? value.slice(2,4).toUpperCase()
