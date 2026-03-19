@@ -397,14 +397,27 @@ export default function App() {
           </button>}
         </div>
         <div className="topbar-right">
-          <div className="wallet-pill" onClick={logout} title="Click to disconnect">
-            <div className="wallet-avatar">{address?address.slice(2,4).toUpperCase():'??'}</div>
-            {shortAddr(address)}
-            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{opacity:.5}}><polyline points="6 9 12 15 18 9"/></svg>
-          </div>
+  <div style={{position:'relative'}}>
+    <div className="wallet-pill" onClick={()=>setShowLogout(s=>!s)}>
+      <div className="wallet-avatar">{address?address.slice(2,4).toUpperCase():'??'}</div>
+      {shortAddr(address)}
+      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{opacity:.5,transition:'transform .2s',transform:showLogout?'rotate(180deg)':'none'}}><polyline points="6 9 12 15 18 9"/></svg>
+    </div>
+    {showLogout&&(
+      <div style={{position:'absolute',top:'calc(100% + 6px)',right:0,background:'var(--bg-card)',border:'1px solid var(--abs-green-border)',borderRadius:'10px',overflow:'hidden',zIndex:9999,boxShadow:'0 8px 24px rgba(0,0,0,.6)',minWidth:'190px',animation:'fadeInUp .15s ease'}}>
+        <div style={{padding:'10px 14px',borderBottom:'1px solid var(--border)'}}>
+          <div style={{fontSize:'.75rem',fontWeight:'600',marginBottom:'2px'}}>{shortAddr(address)}</div>
+          <div style={{fontSize:'.65rem',color:'var(--text-muted)',fontFamily:'var(--font-mono)'}}>Abstract Mainnet</div>
         </div>
-      </div>
-
+        <a href={`https://portal.abs.xyz/profile/${address}`} target="_blank" rel="noreferrer" style={{display:'flex',alignItems:'center',gap:'8px',padding:'9px 14px',textDecoration:'none',color:'var(--text-secondary)',fontSize:'.8rem',borderBottom:'1px solid var(--border)'}} onMouseEnter={e=>e.currentTarget.style.background='var(--bg-hover)'} onMouseLeave={e=>e.currentTarget.style.background='none'}>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
+          View Portal Profile
+        </a>
+        <a href={`https://abscan.org/address/${address}`} target="_blank" rel="noreferrer" style={{display:'flex',alignItems:'center',gap:'8px',padding:'9px 14px',textDecoration:'none',color:'var(--text-secondary)',fontSize:'.8rem',borderBottom:'1px solid var(--border)'}} onMouseEnter={e=>e.currentTarget.style.background='var(--bg-hover)'} onMouseLeave={e=>e.currentTarget.style.background='none'}>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/></svg>
+          View on Abscan
+        </a>
+        <button onClick={()=>
       <div className="app-layout">
         {/* SIDEBAR */}
         <div className="sidebar">
