@@ -22,57 +22,78 @@ const delay = ms => new Promise(r=>setTimeout(r,ms))
 
 function ToField({ value, onChange }) {
   const [info, setInfo] = useState(null)
-  const [loading, setLoading] = useState(false)
   const [focused, setFocused] = useState(false)
 
   useEffect(() => {
-    if (!value || value.length < 2) { setInfo(null); return }
-    const isAddress = value.startsWith('0x') && value.length >= 6
-    const isName = value.length >= 2 && !value.startsWith('0x')
+    setInfo(null)
+    if (!value || value.length < 2) return
+
+    const isAddress = value.startsWith('0x') && value.length >= 10
+    const isName = !value.startsWith('0x') && value.length >= 2
 
     if (isAddress) {
-      setLoading(true)
-      fetch(`https://api.abscan.org/api?module=account&action=balance&address=${value}&apikey=YourApiKeyToken`)
-        .then(r => r.json())
-        .then(data => {
-          const bal = data.result ? (parseInt(data.result) / 1e18).toFixed(4) : null
-          setInfo({ type:'address', display:value, balance:bal,
-            portalUrl:`https://portal.abs.xyz/profile/${value}`,
-            scanUrl:`https://abscan.org/address/${value}` })
+      const timer = setTimeout(() => {
+        fetch(`https://api.abscan.org/api?module=account&action=balance&address=${value}&apikey=YourApiKeyToken`)
+          .then(r => r.json())
+          .then(data => {
+            // Only show if account exists and has valid result
+            if (data.status === '1' && data.result && data.result !== '0') {
+              const bal = (parseInt(data.result) / 1e18).toFixed(4)
+              setInfo({
+                type: 'address',
+                balance: bal,
+                portalUrl: `https://portal.abs.xyz/profile/${value}`,
+                scanUrl: `https://abscan.org/address/${value}`
+              })
+            }
+          })
+          .catch(() => {})
+      }, 600) // wait 600ms after typing stops
+      return () => clearTimeout(timer)
+    }
+
+    if (isName) {
+      const timer = setTimeout(() => {
+        // Show suggestion for any username typed
+        setInfo({
+          type: 'username',
+          portalUrl: `https://portal.abs.xyz/profile/${value}`,
+          scanUrl: null
         })
-        .catch(() => setInfo({ type:'address', display:value, balance:null,
-          portalUrl:`https://portal.abs.xyz/profile/${value}`,
-          scanUrl:`https://abscan.org/address/${value}` }))
-        .finally(() => setLoading(false))
-    } else if (isName) {
-      setInfo({ type:'username', display:value,
-        portalUrl:`https://portal.abs.xyz/profile/${value}`,
-        scanUrl:null })
-    } else {
-      setInfo(null)
+      }, 400)
+      return () => clearTimeout(timer)
     }
   }, [value])
 
-  const show = focused && (loading || info)
-  const initials = value.startsWith('0x') ? value.slice(2,4).toUpperCase() : value.slice(0,2).toUpperCase()
+  const initials = value.startsWith('0x')
+    ? value.slice(2,4).toUpperCase()
+    : value.slice(0,2).toUpperCase()
+
+  const show = focused && info
 
   return (
     <div className="to-field-wrap">
       <input
         value={value}
-        onChange={e => onChange(e.target.value)}
+        onChange={e => { onChange(e.target.value); setInfo(null) }}
         onFocus={() => setFocused(true)}
-        onBlur={() => setTimeout(() => setFocused(false), 150)}
+        onBlur={() => setTimeout(() => { setFocused(false); setInfo(null) }, 200)}
         placeholder="0x address or portal username..."
       />
-      {show && loading && (
-        <div style={{position:'absolute',top:'calc(100% + 6px)',left:0,right:0,background:'var(--bg-card)',border:'1px solid var(--abs-green-border)',borderRadius:'10px',padding:'12px 14px',zIndex:9999,fontSize:'.78rem',color:'var(--text-muted)',fontFamily:'var(--font-mono)'}}>
-          ⏳ Looking up on Abstract...
-        </div>
-      )}
-      {show && info && !loading && (
-        <div style={{position:'absolute',top:'calc(100% + 6px)',left:0,right:0,background:'var(--bg-card)',border:'1px solid var(--abs-green-border)',borderRadius:'10px',overflow:'hidden',zIndex:9999,boxShadow:'0 8px 24px rgba(0,0,0,.6)'}}>
-          <a href={info.portalUrl} target="_blank" rel="noreferrer" style={{textDecoration:'none',display:'flex',alignItems:'center',gap:'10px',padding:'12px 14px',borderBottom:info.scanUrl?'1px solid var(--border)':'none'}}>
+      {show && (
+        <div style={{
+          position:'absolute',top:'calc(100% + 6px)',left:0,right:0,
+          background:'var(--bg-card)',border:'1px solid var(--abs-green-border)',
+          borderRadius:'10px',overflow:'hidden',zIndex:9999,
+          boxShadow:'0 8px 24px rgba(0,0,0,.6)',
+          animation:'fadeInUp .15s ease'
+        }}>
+          
+            href={info.portalUrl}
+            target="_blank"
+            rel="noreferrer"
+            style={{textDecoration:'none',display:'flex',alignItems:'center',gap:'10px',padding:'12px 14px',borderBottom:info.scanUrl?'1px solid var(--border)':'none'}}
+          >
             <div style={{width:'32px',height:'32px',borderRadius:'50%',background:'var(--abs-green-pale)',border:'1px solid var(--abs-green-border)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'.7rem',color:'var(--abs-green)',fontFamily:'var(--font-mono)',fontWeight:'700',flexShrink:0}}>
               {initials}
             </div>
@@ -85,7 +106,12 @@ function ToField({ value, onChange }) {
             <div style={{fontSize:'.65rem',color:'var(--abs-green)',fontFamily:'var(--font-mono)'}}>portal ↗</div>
           </a>
           {info.scanUrl && (
-            <a href={info.scanUrl} target="_blank" rel="noreferrer" style={{textDecoration:'none',display:'flex',alignItems:'center',gap:'10px',padding:'10px 14px'}}>
+            
+              href={info.scanUrl}
+              target="_blank"
+              rel="noreferrer"
+              style={{textDecoration:'none',display:'flex',alignItems:'center',gap:'10px',padding:'10px 14px'}}
+            >
               <div style={{width:'32px',height:'32px',borderRadius:'50%',background:'rgba(0,255,133,.04)',border:'1px solid var(--border)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'.9rem',flexShrink:0}}>⛓</div>
               <div style={{flex:1}}>
                 <div style={{fontSize:'.82rem',fontWeight:'500',color:'var(--text-secondary)',marginBottom:'2px'}}>View on Abscan</div>
