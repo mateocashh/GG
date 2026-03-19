@@ -23,6 +23,7 @@ const delay = ms => new Promise(r=>setTimeout(r,ms))
 function ToField({ value, onChange }) {
   const [info, setInfo] = useState(null)
   const [loading, setLoading] = useState(false)
+  const [focused, setFocused] = useState(false)
 
   useEffect(() => {
     if (!value || value.length < 2) { setInfo(null); return }
@@ -52,6 +53,52 @@ function ToField({ value, onChange }) {
     }
   }, [value])
 
+  const show = focused && (loading || info)
+  const initials = value.startsWith('0x') ? value.slice(2,4).toUpperCase() : value.slice(0,2).toUpperCase()
+
+  return (
+    <div className="to-field-wrap">
+      <input
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setTimeout(() => setFocused(false), 150)}
+        placeholder="0x address or portal username..."
+      />
+      {show && loading && (
+        <div style={{position:'absolute',top:'calc(100% + 6px)',left:0,right:0,background:'var(--bg-card)',border:'1px solid var(--abs-green-border)',borderRadius:'10px',padding:'12px 14px',zIndex:9999,fontSize:'.78rem',color:'var(--text-muted)',fontFamily:'var(--font-mono)'}}>
+          ⏳ Looking up on Abstract...
+        </div>
+      )}
+      {show && info && !loading && (
+        <div style={{position:'absolute',top:'calc(100% + 6px)',left:0,right:0,background:'var(--bg-card)',border:'1px solid var(--abs-green-border)',borderRadius:'10px',overflow:'hidden',zIndex:9999,boxShadow:'0 8px 24px rgba(0,0,0,.6)'}}>
+          <a href={info.portalUrl} target="_blank" rel="noreferrer" style={{textDecoration:'none',display:'flex',alignItems:'center',gap:'10px',padding:'12px 14px',borderBottom:info.scanUrl?'1px solid var(--border)':'none'}}>
+            <div style={{width:'32px',height:'32px',borderRadius:'50%',background:'var(--abs-green-pale)',border:'1px solid var(--abs-green-border)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'.7rem',color:'var(--abs-green)',fontFamily:'var(--font-mono)',fontWeight:'700',flexShrink:0}}>
+              {initials}
+            </div>
+            <div style={{flex:1}}>
+              <div style={{fontSize:'.85rem',fontWeight:'600',color:'var(--text-primary)',marginBottom:'2px'}}>{value}</div>
+              <div style={{fontSize:'.7rem',color:'var(--text-secondary)',fontFamily:'var(--font-mono)'}}>
+                {info.balance ? `${info.balance} ETH · ` : ''}View on Abstract Portal ↗
+              </div>
+            </div>
+            <div style={{fontSize:'.65rem',color:'var(--abs-green)',fontFamily:'var(--font-mono)'}}>portal ↗</div>
+          </a>
+          {info.scanUrl && (
+            <a href={info.scanUrl} target="_blank" rel="noreferrer" style={{textDecoration:'none',display:'flex',alignItems:'center',gap:'10px',padding:'10px 14px'}}>
+              <div style={{width:'32px',height:'32px',borderRadius:'50%',background:'rgba(0,255,133,.04)',border:'1px solid var(--border)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'.9rem',flexShrink:0}}>⛓</div>
+              <div style={{flex:1}}>
+                <div style={{fontSize:'.82rem',fontWeight:'500',color:'var(--text-secondary)',marginBottom:'2px'}}>View on Abscan</div>
+                <div style={{fontSize:'.7rem',color:'var(--text-muted)',fontFamily:'var(--font-mono)'}}>Check transactions & activity</div>
+              </div>
+              <div style={{fontSize:'.65rem',color:'var(--text-muted)',fontFamily:'var(--font-mono)'}}>abscan ↗</div>
+            </a>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
   const initials = value.startsWith('0x') ? value.slice(2,4).toUpperCase() : value.slice(0,2).toUpperCase()
 
   return (
