@@ -251,6 +251,7 @@ export default function App() {
   const [toast, setToast] = useState({show:false, hash:''})
   const [block, setBlock] = useState(4829201)
   const [connecting, setConnecting] = useState(false)
+  const [showLogout, setShowLogout] = useState(false)
   const [search, setSearch] = useState('')
   const [starred, setStarred] = useState({})
 
