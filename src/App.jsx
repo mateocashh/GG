@@ -28,42 +28,93 @@ function ToField({ value, onChange }) {
     setInfo(null)
     if (!value || value.length < 2) return
 
-    const isAddress = value.startsWith('0x') && value.length >= 10
-    const isName = !value.startsWith('0x') && value.length >= 2
+    const timer = setTimeout(async () => {
+      try {
+        // Try Portal API — works for both address and username
+        const res = await fetch(`https://portal.abs.xyz/api/users/${value}`)
+        if (res.ok) {
+          const data = await res.json()
+          if (data && (data.username || data.address)) {
+            setInfo({
+              username: data.username || null,
+              address: data.address || value,
+              avatar: data.avatar || null,
+              portalUrl: `https://portal.abs.xyz/profile/${data.username || data.address || value}`,
+              scanUrl: `https://abscan.org/address/${data.address || value}`
+            })
+            return
+          }
+        }
+      } catch(e) {}
 
-    if (isAddress) {
-      const timer = setTimeout(() => {
-        fetch(`https://api.abscan.org/api?module=account&action=balance&address=${value}&apikey=YourApiKeyToken`)
-          .then(r => r.json())
-          .then(data => {
-            // Only show if account exists and has valid result
-            if (data.status === '1' && data.result && data.result !== '0') {
-              const bal = (parseInt(data.result) / 1e18).toFixed(4)
-              setInfo({
-                type: 'address',
-                balance: bal,
-                portalUrl: `https://portal.abs.xyz/profile/${value}`,
-                scanUrl: `https://abscan.org/address/${value}`
-              })
-            }
-          })
-          .catch(() => {})
-      }, 600) // wait 600ms after typing stops
-      return () => clearTimeout(timer)
-    }
-
-    if (isName) {
-      const timer = setTimeout(() => {
-        // Show suggestion for any username typed
+      // Fallback — just show portal link for anything typed
+      const isAddress = value.startsWith('0x') && value.length >= 10
+      const isName = !value.startsWith('0x') && value.length >= 2
+      if (isAddress || isName) {
         setInfo({
-          type: 'username',
+          username: isName ? value : null,
+          address: isAddress ? value : null,
+          avatar: null,
           portalUrl: `https://portal.abs.xyz/profile/${value}`,
-          scanUrl: null
+          scanUrl: isAddress ? `https://abscan.org/address/${value}` : null
         })
-      }, 400)
-      return () => clearTimeout(timer)
-    }
+      }
+    }, 500)
+
+    return () => clearTimeout(timer)
   }, [value])
+
+  const initials = value.startsWith('0x')
+    ? value.slice(2,4).toUpperCase()
+    : value.slice(0,2).toUpperCase()
+
+  const show = focused && info
+
+  return (
+    <div className="to-field-wrap">
+      <input
+        value={value}
+        onChange={e => { onChange(e.target.value); setInfo(null) }}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setTimeout(() => { setFocused(false); setInfo(null) }, 200)}
+        placeholder="0x address or portal username..."
+      />
+      {show && (
+        <div style={{position:'absolute',top:'calc(100% + 6px)',left:0,right:0,background:'var(--bg-card)',border:'1px solid var(--abs-green-border)',borderRadius:'10px',overflow:'hidden',zIndex:9999,boxShadow:'0 8px 24px rgba(0,0,0,.6)',animation:'fadeInUp .15s ease'}}>
+          <a href={info.portalUrl} target="_blank" rel="noreferrer"
+            style={{textDecoration:'none',display:'flex',alignItems:'center',gap:'10px',padding:'12px 14px',borderBottom:info.scanUrl?'1px solid var(--border)':'none'}}>
+            <div style={{width:'36px',height:'36px',borderRadius:'50%',overflow:'hidden',flexShrink:0,border:'1px solid var(--abs-green-border)'}}>
+              {info.avatar
+                ? <img src={info.avatar} alt="" style={{width:'100%',height:'100%',objectFit:'cover'}}/>
+                : <div style={{width:'100%',height:'100%',background:'var(--abs-green-pale)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'.7rem',color:'var(--abs-green)',fontFamily:'var(--font-mono)',fontWeight:'700'}}>{initials}</div>
+              }
+            </div>
+            <div style={{flex:1}}>
+              <div style={{fontSize:'.85rem',fontWeight:'600',color:'var(--text-primary)',marginBottom:'2px'}}>
+                {info.username || value}
+              </div>
+              <div style={{fontSize:'.7rem',color:'var(--text-secondary)',fontFamily:'var(--font-mono)'}}>
+                {info.address ? `${info.address.slice(0,8)}...${info.address.slice(-4)} · ` : ''}View on Abstract Portal ↗
+              </div>
+            </div>
+            <div style={{fontSize:'.65rem',color:'var(--abs-green)',fontFamily:'var(--font-mono)'}}>portal ↗</div>
+          </a>
+          {info.scanUrl && (
+            <a href={info.scanUrl} target="_blank" rel="noreferrer"
+              style={{textDecoration:'none',display:'flex',alignItems:'center',gap:'10px',padding:'10px 14px'}}>
+              <div style={{width:'32px',height:'32px',borderRadius:'50%',background:'rgba(0,255,133,.04)',border:'1px solid var(--border)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'.9rem',flexShrink:0}}>⛓</div>
+              <div style={{flex:1}}>
+                <div style={{fontSize:'.82rem',fontWeight:'500',color:'var(--text-secondary)',marginBottom:'2px'}}>View on Abscan</div>
+                <div style={{fontSize:'.7rem',color:'var(--text-muted)',fontFamily:'var(--font-mono)'}}>Check transactions & activity</div>
+              </div>
+              <div style={{fontSize:'.65rem',color:'var(--text-muted)',fontFamily:'var(--font-mono)'}}>abscan ↗</div>
+            </a>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
 
   const initials = value.startsWith('0x')
     ? value.slice(2,4).toUpperCase()
