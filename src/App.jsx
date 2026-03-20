@@ -220,7 +220,7 @@ function MailViewer({ selected, profiles, onReply, onStar, onDelete }) {
           {selected.txHash && <a href={`https://abscan.org/tx/${selected.txHash}`} target="_blank" rel="noreferrer" className="txn-badge"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/></svg>Tx: <strong>{shortAddr(selected.txHash)}</strong></a>}
           <div style={{marginLeft:'auto',display:'flex',gap:'6px'}}>
             <button className="action-btn" onClick={()=>onReply(selected.fromShort||selected.from)}><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="9 17 4 12 9 7"/><path d="M20 18v-2a4 4 0 00-4-4H4"/></svg>Reply</button>
-            <button className="action-btn" onClick={onStar}><svg width="11" height="11" viewBox="0 0 24 24" fill={selected.starred?'var(--g)':'none'} stroke="var(--g)" strokeWidth="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>{selected.starred?'Unstar':'Star'}</button>
+            <button className="action-btn" onClick={onStar}><svg width="11" height="11" viewBox="0 0 24 24" fill={selected.starred?'#00FF85':'none'} stroke="#00FF85" strokeWidth="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>{selected.starred?'Unstar':'Star'}</button>
             {!selected.permanent && <button className="action-btn" onClick={onDelete}><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a1 1 0 011-1h4a1 1 0 011 1v2"/></svg>Delete</button>}
           </div>
         </div>
@@ -633,8 +633,6 @@ export default function App() {
                 </div>
               </div>
             )})
-          </div>
-        </div>
 
         <div className="mailview">
           {!selected ? (
