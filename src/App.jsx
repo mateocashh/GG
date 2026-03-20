@@ -356,7 +356,7 @@ export default function App() {
   }, [login])
 
   // ── Mail lists ─────────────────────────────────────────────────────────────
-  const allInbox = [...inbox].sort((a,b) => new Date(b.sentAt||0) - new Date(a.sentAt||0)).concat([founderMsg])
+  const allInbox = [...inbox].sort((a,b) => new Date(b.time||0) - new Date(a.time||0)).concat([founderMsg])
   const getMails = () => {
     const all = [...allInbox, ...sent]
     if (view==='sent') return sent
@@ -632,7 +632,8 @@ export default function App() {
                   {m.id==='founder-1'&&<span className="mail-tag">founder</span>}
                 </div>
               </div>
-            )})
+              )
+            })
           </div>
         </div>
 
