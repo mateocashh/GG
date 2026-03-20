@@ -222,17 +222,27 @@ export default function App() {
   },[])
 
   useEffect(()=>{
-    if (!address) return
-    fetch(`https://auth.privy.io/api/v1/users/address/${address}`, {
-      headers: { 'privy-app-id': PRIVY_APP_ID, 'Content-Type': 'application/json' }
-    })
-    .then(r=>r.json())
-    .then(data=>{
-      const uname = data.linked_accounts?.find(a=>a.type==='username')
-      const avatar = data.linked_accounts?.find(a=>a.profile_picture_url)?.profile_picture_url || null
-      setUserProfile({ name: uname?.username || null, avatar })
-    })
-    .catch(()=>{})
+    if(!address) return
+    fetch(`https://api.portal.abs.xyz/v1/users/${address}`)
+      .then(r=>r.ok?r.json():Promise.reject())
+      .then(data=>{
+        const avatar=data.profile_image_url||data.avatar||data.profileImage||null
+        const name=data.username||data.name||null
+        if(avatar||name){setUserProfile({name,avatar});return}
+        throw new Error('no data')
+      })
+      .catch(()=>{
+        fetch(`https://auth.privy.io/api/v1/users/address/${address}`,{
+          headers:{'privy-app-id':PRIVY_APP_ID,'Content-Type':'application/json'}
+        })
+        .then(r=>r.json())
+        .then(data=>{
+          const uname=data.linked_accounts?.find(a=>a.type==='username')
+          const avatar=data.linked_accounts?.find(a=>a.profile_picture_url)?.profile_picture_url||null
+          setUserProfile({name:uname?.username||null,avatar})
+        })
+        .catch(()=>{})
+      })
   },[address])
 
   useEffect(()=>{
