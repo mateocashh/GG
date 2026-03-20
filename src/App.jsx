@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useLoginWithAbstract, useAbstractClient } from '@abstract-foundation/agw-react'
 import { useAccount } from 'wagmi'
+import { usePrivy } from '@privy-io/react-auth'
 import { createClient } from '@supabase/supabase-js'
 
 const PRIVY_APP_ID = 'clpispdty00yfmi08jf7pi18p'
@@ -206,6 +207,7 @@ export default function App() {
   const { login, logout } = useLoginWithAbstract()
   const { address, isConnected } = useAccount()
   const { data: abstractClient } = useAbstractClient()
+  const { user: privyUser } = usePrivy()
 
   const [view, setView] = useState('inbox')
   const [tab, setTab] = useState('all')
@@ -271,30 +273,34 @@ export default function App() {
     finally { setLoading(false) }
   }
 
-  // ── Save user profile to Supabase on login ────────────────────────────────
+  // ── User profile from Privy (no API call needed) ───────────────────────────
   useEffect(() => {
-    if (!address) return
-    // Fetch profile then save to users table
-    fetch(`/api/resolve?address=${address}`)
-      .then(r => r.json())
-      .then(data => {
-        const name = data.username || null
-        const avatar = data.avatar || null
-        setUserProfile({ name, avatar })
-        // Save to Supabase users table so others can find us
-        if (name || avatar) {
-          sb.from('users').upsert({
-            wallet_address: address.toLowerCase(),
-            username: name,
-            avatar_url: avatar,
-            updated_at: new Date().toISOString(),
-          }, { onConflict: 'wallet_address' }).then(({error}) => {
-            if (error) console.error('save user:', error.message)
-          })
-        }
-      })
-      .catch(() => {})
-  }, [address])
+    if (!privyUser || !address) return
+    // Get username from linked accounts
+    const usernameAccount = privyUser.linkedAccounts?.find(a => a.type === 'username')
+    const twitterAccount = privyUser.linkedAccounts?.find(a => a.type === 'twitter_oauth')
+    const googleAccount = privyUser.linkedAccounts?.find(a => a.type === 'google_oauth')
+    const name = usernameAccount?.username
+      || twitterAccount?.username
+      || googleAccount?.name
+      || null
+    // Get avatar from linked accounts
+    const avatar = usernameAccount?.profile_picture_url
+      || twitterAccount?.profile_picture_url
+      || googleAccount?.profile_picture_url
+      || privyUser.linkedAccounts?.find(a => a.profile_picture_url)?.profile_picture_url
+      || null
+    setUserProfile({ name, avatar })
+    // Save to Supabase so others can find this user
+    if (name || avatar) {
+      sb.from('users').upsert({
+        wallet_address: address.toLowerCase(),
+        username: name,
+        avatar_url: avatar,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'wallet_address' }).catch(() => {})
+    }
+  }, [privyUser, address])
 
   // ── Logout dropdown close ──────────────────────────────────────────────────
   useEffect(() => {
