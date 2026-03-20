@@ -7,55 +7,42 @@ export default async function handler(req, res) {
   const PRIVY_APP_ID = 'clpispdty00yfmi08jf7pi18p'
 
   try {
-    // Try Abstract Portal public API first
-    if (username) {
-      const portalRes = await fetch(`https://portal.abs.xyz/api/users/by-username/${username}`)
-      if (portalRes.ok) {
-        const data = await portalRes.json()
-        return res.status(200).json({
-          address: data.wallet_address || data.address || null,
-          username: data.username || username,
-          avatar: data.profile_image_url || data.avatar_url || data.pfp || null,
-        })
-      }
-    }
-
+    let endpoint = null
     if (address) {
-      const portalRes = await fetch(`https://portal.abs.xyz/api/users/by-address/${address}`)
-      if (portalRes.ok) {
-        const data = await portalRes.json()
-        return res.status(200).json({
-          address: data.wallet_address || address,
-          username: data.username || null,
-          avatar: data.profile_image_url || data.avatar_url || data.pfp || null,
-        })
-      }
+      endpoint = `https://auth.privy.io/api/v1/users/address/${address}`
+    } else if (username) {
+      endpoint = `https://auth.privy.io/api/v1/users/username/${username}`
+    } else {
+      return res.status(400).json({ error: 'address or username required' })
     }
 
-    // Fallback: Privy auth endpoint
-    const endpoint = address
-      ? `https://auth.privy.io/api/v1/users/address/${address}`
-      : `https://auth.privy.io/api/v1/users/username/${username}`
-
-    const privyRes = await fetch(endpoint, {
+    const r = await fetch(endpoint, {
       headers: {
         'privy-app-id': PRIVY_APP_ID,
         'Content-Type': 'application/json',
       },
     })
 
-    if (!privyRes.ok) return res.status(404).json({ error: 'User not found' })
+    if (!r.ok) return res.status(404).json({ error: 'User not found' })
 
-    const data = await privyRes.json()
-    const wallet = data.linked_accounts?.find(a =>
-      a.type === 'smart_wallet' || a.type === 'wallet'
-    )
-    const uname = data.linked_accounts?.find(a => a.type === 'username')
-    const avatar = data.linked_accounts?.find(a => a.profile_picture_url)?.profile_picture_url || null
+    const data = await r.json()
+    const accounts = data.linked_accounts || []
+
+    // Get wallet address
+    const wallet = accounts.find(a => a.type === 'smart_wallet' || a.type === 'wallet')
+    // Get username
+    const uname = accounts.find(a => a.type === 'username')
+    // Get avatar - check all accounts for profile picture
+    const avatarAccount = accounts.find(a => a.profile_picture_url)
+    const avatar = avatarAccount?.profile_picture_url || null
+    // Get display name - try twitter/google first
+    const twitter = accounts.find(a => a.type === 'twitter_oauth')
+    const google = accounts.find(a => a.type === 'google_oauth')
+    const displayName = uname?.username || twitter?.username || google?.name || null
 
     return res.status(200).json({
-      address: wallet?.address || (address || null),
-      username: uname?.username || (username || null),
+      address: wallet?.address || address || null,
+      username: displayName,
       avatar,
     })
   } catch (e) {
