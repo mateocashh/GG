@@ -11,7 +11,6 @@
   "dependencies": {
     "@abstract-foundation/agw-client": "latest",
     "@abstract-foundation/agw-react": "latest",
-    "@privy-io/react-auth": "^1.99.1",
     "@supabase/supabase-js": "^2.39.0",
     "@tanstack/react-query": "^5.0.0",
     "react": "^18.3.1",
