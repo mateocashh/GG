@@ -1,40 +1,77 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useLoginWithAbstract, useAbstractClient } from '@abstract-foundation/agw-react'
-import { useAccount } from 'wagmi'
+import { useAccount, useWalletClient } from 'wagmi'
+import { Client, IdentifierKind } from '@xmtp/browser-sdk'
+import { toBytes } from 'viem'
 
 const PRIVY_APP_ID = 'clpispdty00yfmi08jf7pi18p'
 
-const INBOX_INIT = [
-  {
-    id:1, fromShort:'skarxbt', from:'0xB5191Cfa55Ee8b9E1b73CD8BB706e48D19D36191',
-    fromInitials:'SK', fromAvatar:null, isFounder:true,
-    subject:'Welcome to abs.mail ✦',
-    preview:"You're one of the first people to receive a message on abs.mail...",
-    body:`Hey,\n\nYou're one of the first people to receive a message on abs.mail — the on-chain mail protocol I built on Abstract Chain.\n\nEvery message here is a real transaction. Your inbox is decentralized, encrypted, and owned entirely by your wallet. No servers. No middlemen. No censorship.\n\nI built this because I believe communication should be as open and permissionless as the chains we build on.\n\n— skarxbt\n   Founder, abs.mail`,
-    time:'09:14', date:'Today',
-    txHash:'0x4a3f2b7c9d1e8f0a3b5c2d7e9f1a4b6c8e0d2f4',
-    encrypted:true, unread:true, starred:true, tags:['founder']
-  },
-]
-
-function encryptMsg(text, key) {
-  try {
-    return btoa(unescape(encodeURIComponent(
-      text.split('').map((c,i)=>String.fromCharCode(c.charCodeAt(0)^key.charCodeAt(i%key.length))).join('')
-    )))
-  } catch { return text }
-}
-function decryptMsg(enc, key) {
-  try {
-    const raw = decodeURIComponent(escape(atob(enc)))
-    return raw.split('').map((c,i)=>String.fromCharCode(c.charCodeAt(0)^key.charCodeAt(i%key.length))).join('')
-  } catch { return enc }
+// ── Founder welcome message (always pinned) ──────────────────────────────────
+const FOUNDER_MSG = {
+  id: 'founder-1',
+  fromShort: 'skarxbt',
+  from: '0xB5191Cfa55Ee8b9E1b73CD8BB706e48D19D36191',
+  fromInitials: 'SK',
+  fromAvatar: null,
+  subject: 'Welcome to abs.mail ✦',
+  preview: "You're one of the first people to receive a message on abs.mail...",
+  body: `Hey,\n\nYou're one of the first people to receive a message on abs.mail — the on-chain mail protocol I built on Abstract Chain.\n\nEvery message here is a real transaction. Your inbox is decentralized, encrypted, and owned entirely by your wallet. No servers. No middlemen. No censorship.\n\nI built this because I believe communication should be as open and permissionless as the chains we build on.\n\n— skarxbt\n   Founder, abs.mail`,
+  time: '09:14',
+  date: 'Today',
+  txHash: '0x4a3f2b7c9d1e8f0a3b5c2d7e9f1a4b6c8e0d2f4',
+  encrypted: true,
+  unread: true,
+  starred: true,
+  tags: ['founder'],
+  permanent: true,
+  xmtp: false,
 }
 
+// ── Helpers ───────────────────────────────────────────────────────────────────
 const shortAddr = a => a ? a.slice(0,6)+'...'+a.slice(-4) : ''
-const randomHex = n => [...Array(n)].map(()=>'0123456789abcdef'[Math.floor(Math.random()*16)]).join('')
-const delay = ms => new Promise(r=>setTimeout(r,ms))
+const delay = ms => new Promise(r => setTimeout(r, ms))
 
+function fmtTime(d) {
+  const now = new Date()
+  const diff = now - d
+  if (diff < 86400000) return d.toLocaleTimeString('en', {hour:'2-digit', minute:'2-digit'})
+  if (diff < 604800000) return d.toLocaleDateString('en', {weekday:'short'})
+  return d.toLocaleDateString('en', {month:'short', day:'numeric'})
+}
+
+function msgToMail(xmtpMsg, myAddress) {
+  const isSent = xmtpMsg.senderInboxId?.toLowerCase().includes(myAddress?.toLowerCase())
+  const content = typeof xmtpMsg.content === 'string' ? xmtpMsg.content : JSON.stringify(xmtpMsg.content)
+  let subject = '(no subject)', body = content
+  try {
+    const parsed = JSON.parse(content)
+    if (parsed.subject) { subject = parsed.subject; body = parsed.body || content }
+  } catch {}
+  const d = new Date(Number(xmtpMsg.sentAtNs) / 1e6)
+  return {
+    id: xmtpMsg.id,
+    from: xmtpMsg.senderInboxId,
+    fromShort: shortAddr(xmtpMsg.senderInboxId),
+    fromInitials: xmtpMsg.senderInboxId?.slice(0,2).toUpperCase() || '??',
+    fromAvatar: null,
+    subject,
+    preview: body.slice(0, 80),
+    body,
+    time: fmtTime(d),
+    date: d.toLocaleDateString('en', {month:'short', day:'numeric'}),
+    txHash: null,
+    encrypted: true,
+    unread: !isSent,
+    starred: false,
+    tags: [],
+    permanent: false,
+    xmtp: true,
+    conversationId: xmtpMsg.conversationId,
+    isSent,
+  }
+}
+
+// ── ToField ───────────────────────────────────────────────────────────────────
 function ToField({ value, onChange }) {
   const [info, setInfo] = useState(null)
   const [loading, setLoading] = useState(false)
@@ -61,18 +98,18 @@ function ToField({ value, onChange }) {
           const avatar = data.linked_accounts?.find(a => a.profile_picture_url)?.profile_picture_url || null
           const addr = wallet?.address || (isAddress ? value : null)
           const name = uname?.username || data.username || (isName ? value : null)
-          setInfo({ name, addr, avatar, found:true,
-            portalUrl:`https://portal.abs.xyz/profile/${name||addr||value}`,
+          setInfo({ name, addr, avatar, found: true,
+            portalUrl: `https://portal.abs.xyz/profile/${name||addr||value}`,
             scanUrl: addr ? `https://abscan.org/address/${addr}` : null })
         } else {
-          setInfo({ name:isName?value:null, addr:isAddress?value:null, avatar:null, found:false,
-            portalUrl:`https://portal.abs.xyz/profile/${value}`,
-            scanUrl:isAddress?`https://abscan.org/address/${value}`:null })
+          setInfo({ name: isName?value:null, addr: isAddress?value:null, avatar:null, found:false,
+            portalUrl: `https://portal.abs.xyz/profile/${value}`,
+            scanUrl: isAddress ? `https://abscan.org/address/${value}` : null })
         }
       } catch {
         setInfo({ name:isName?value:null, addr:isAddress?value:null, avatar:null, found:false,
-          portalUrl:`https://portal.abs.xyz/profile/${value}`,
-          scanUrl:isAddress?`https://abscan.org/address/${value}`:null })
+          portalUrl: `https://portal.abs.xyz/profile/${value}`,
+          scanUrl: isAddress ? `https://abscan.org/address/${value}` : null })
       } finally { setLoading(false) }
     }, 500)
     return () => clearTimeout(timer)
@@ -101,7 +138,7 @@ function ToField({ value, onChange }) {
       {show && info && !loading && (
         <div className="to-dropdown">
           {info.found && (
-            <div style={{padding:'3px 11px',background:'rgba(0,255,133,.06)',borderBottom:'1px solid var(--border)',fontSize:'.62rem',color:'var(--abs-green)',fontFamily:'var(--font-mono)',letterSpacing:'.06em'}}>
+            <div style={{padding:'3px 14px',background:'rgba(0,255,133,.06)',borderBottom:'1px solid var(--border)',fontSize:'.62rem',color:'var(--abs-green)',fontFamily:'var(--font-mono)',letterSpacing:'.06em'}}>
               ✦ ABSTRACT USER FOUND
             </div>
           )}
@@ -113,25 +150,23 @@ function ToField({ value, onChange }) {
               }
             </div>
             <div style={{flex:1,minWidth:0}}>
-              <div style={{fontSize:'.85rem',fontWeight:'600',color:'var(--text-primary)',marginBottom:'2px',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
-                {info.name || value}
-              </div>
+              <div style={{fontSize:'.85rem',fontWeight:'600',color:'var(--text-primary)',marginBottom:'2px'}}>{info.name || value}</div>
               <div style={{fontSize:'.7rem',color:'var(--text-secondary)',fontFamily:'var(--font-mono)'}}>
                 {info.addr ? shortAddr(info.addr)+' · ' : ''}View on Abstract Portal ↗
               </div>
             </div>
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--abs-green)" strokeWidth="2"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--abs-green)" strokeWidth="2"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
           </a>
           {info.scanUrl && (
             <a href={info.scanUrl} target="_blank" rel="noreferrer" className="to-dropdown-row">
               <div className="to-avatar" style={{background:'rgba(0,255,133,.04)',border:'1px solid var(--border)'}}>
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/></svg>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/></svg>
               </div>
               <div style={{flex:1}}>
                 <div style={{fontSize:'.82rem',fontWeight:'500',color:'var(--text-secondary)',marginBottom:'2px'}}>View on Abscan</div>
                 <div style={{fontSize:'.7rem',color:'var(--text-muted)',fontFamily:'var(--font-mono)'}}>On-chain transactions & activity</div>
               </div>
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="2"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="2"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
             </a>
           )}
         </div>
@@ -140,14 +175,14 @@ function ToField({ value, onChange }) {
   )
 }
 
-function ComposeModal({ onClose, onSend, defaultTo='' }) {
+// ── ComposeModal ──────────────────────────────────────────────────────────────
+function ComposeModal({ onClose, onSend, defaultTo = '' }) {
   const [to, setTo] = useState(defaultTo)
   const [subject, setSubject] = useState('')
   const [body, setBody] = useState('')
   const [encrypted, setEncrypted] = useState(true)
-
   return (
-    <div className="modal-backdrop" onClick={e=>e.target===e.currentTarget&&onClose()}>
+    <div className="modal-backdrop" onClick={e => e.target === e.currentTarget && onClose()}>
       <div className="compose-box">
         <div className="compose-header">
           <div className="compose-title">
@@ -169,23 +204,23 @@ function ComposeModal({ onClose, onSend, defaultTo='' }) {
           </div>
           <div className="compose-field">
             <span className="field-label">Subject</span>
-            <input value={subject} onChange={e=>setSubject(e.target.value)} placeholder="What's this about..."/>
+            <input value={subject} onChange={e => setSubject(e.target.value)} placeholder="What's this about..."/>
           </div>
         </div>
         <div className="compose-body">
-          <textarea value={body} onChange={e=>setBody(e.target.value)} placeholder="Write your message..."/>
+          <textarea value={body} onChange={e => setBody(e.target.value)} placeholder="Write your message..."/>
         </div>
         <div className="gas-note">
           This message will be recorded as a transaction on <span>Abstract Chain</span>
         </div>
         <div className="compose-footer">
           <div className="compose-footer-left">
-            <button className={`enc-toggle ${encrypted?'on':''}`} onClick={()=>setEncrypted(e=>!e)}>
+            <button className={`enc-toggle ${encrypted?'on':''}`} onClick={() => setEncrypted(e => !e)}>
               <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
               {encrypted ? 'Encrypted' : 'Plain text'}
             </button>
           </div>
-          <button className="btn-send" onClick={()=>onSend({to,subject,body,encrypted})} disabled={!to.trim()||!subject.trim()||!body.trim()}>
+          <button className="btn-send" onClick={() => onSend({to, subject, body, encrypted})} disabled={!to.trim()||!subject.trim()||!body.trim()}>
             <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
             Send on-chain
           </button>
@@ -195,146 +230,287 @@ function ComposeModal({ onClose, onSend, defaultTo='' }) {
   )
 }
 
+// ── Main App ──────────────────────────────────────────────────────────────────
 export default function App() {
-  const {login, logout} = useLoginWithAbstract()
-  const {address, isConnected} = useAccount()
-  const {data: abstractClient} = useAbstractClient()
+  const { login, logout } = useLoginWithAbstract()
+  const { address, isConnected } = useAccount()
+  const { data: walletClient } = useWalletClient()
+  const { data: abstractClient } = useAbstractClient()
 
+  // UI state
   const [view, setView] = useState('inbox')
   const [tab, setTab] = useState('all')
   const [selectedId, setSelectedId] = useState(null)
-  const [inbox, setInbox] = useState(INBOX_INIT)
-  const [sent, setSent] = useState([])
   const [composing, setComposing] = useState(false)
   const [replyTo, setReplyTo] = useState('')
   const [step, setStep] = useState(0)
-  const [toast, setToast] = useState({show:false, hash:''})
+  const [toast, setToast] = useState({ show: false, hash: '' })
   const [block, setBlock] = useState(4829201)
   const [connecting, setConnecting] = useState(false)
+  const [showLogout, setShowLogout] = useState(false)
   const [search, setSearch] = useState('')
   const [starred, setStarred] = useState({})
-  const [showLogout, setShowLogout] = useState(false)
-  const [userProfile, setUserProfile] = useState({ name:null, avatar:null })
+  const [userProfile, setUserProfile] = useState({ name: null, avatar: null })
 
-  useEffect(()=>{
-    const iv = setInterval(()=>setBlock(n=>n+Math.floor(Math.random()*3)+1), 3000)
-    return ()=>clearInterval(iv)
-  },[])
+  // XMTP state
+  const [xmtpClient, setXmtpClient] = useState(null)
+  const [xmtpLoading, setXmtpLoading] = useState(false)
+  const [xmtpError, setXmtpError] = useState(null)
+  const [xmtpMails, setXmtpMails] = useState([])
+  const [xmtpSent, setXmtpSent] = useState([])
+  const [founderMsg, setFounderMsg] = useState({ ...FOUNDER_MSG })
+  const streamRef = useRef(null)
 
-  useEffect(()=>{
-    if(!address) return
+  // ── Block counter ──────────────────────────────────────────────────────────
+  useEffect(() => {
+    const iv = setInterval(() => setBlock(n => n + Math.floor(Math.random()*3)+1), 3000)
+    return () => clearInterval(iv)
+  }, [])
+
+  // ── User profile fetch ─────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!address) return
     fetch(`https://api.portal.abs.xyz/v1/users/${address}`)
-      .then(r=>r.ok?r.json():Promise.reject())
-      .then(data=>{
-        const avatar=data.profile_image_url||data.avatar||data.profileImage||null
-        const name=data.username||data.name||null
-        if(avatar||name){setUserProfile({name,avatar});return}
+      .then(r => r.ok ? r.json() : Promise.reject())
+      .then(data => {
+        const avatar = data.profile_image_url || data.avatar || data.profileImage || null
+        const name = data.username || data.name || null
+        if (avatar || name) { setUserProfile({ name, avatar }); return }
         throw new Error('no data')
       })
-      .catch(()=>{
-        fetch(`https://auth.privy.io/api/v1/users/address/${address}`,{
-          headers:{'privy-app-id':PRIVY_APP_ID,'Content-Type':'application/json'}
+      .catch(() => {
+        fetch(`https://auth.privy.io/api/v1/users/address/${address}`, {
+          headers: { 'privy-app-id': PRIVY_APP_ID, 'Content-Type': 'application/json' }
         })
-        .then(r=>r.json())
-        .then(data=>{
-          const uname=data.linked_accounts?.find(a=>a.type==='username')
-          const avatar=data.linked_accounts?.find(a=>a.profile_picture_url)?.profile_picture_url||null
-          setUserProfile({name:uname?.username||null,avatar})
+        .then(r => r.json())
+        .then(data => {
+          const uname = data.linked_accounts?.find(a => a.type === 'username')
+          const avatar = data.linked_accounts?.find(a => a.profile_picture_url)?.profile_picture_url || null
+          setUserProfile({ name: uname?.username || null, avatar })
         })
-        .catch(()=>{})
+        .catch(() => {})
       })
-  },[address])
+  }, [address])
 
-  useEffect(()=>{
-    const handler = e => {
-      if(!e.target.closest('.wallet-pill') && !e.target.closest('.logout-dropdown')) {
-        setShowLogout(false)
+  // ── XMTP init ──────────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!address || !walletClient || !isConnected) return
+    initXmtp()
+  }, [address, walletClient, isConnected])
+
+  async function initXmtp() {
+    setXmtpLoading(true)
+    setXmtpError(null)
+    try {
+      const signer = {
+        type: 'SCW',
+        getIdentifier: () => ({
+          identifier: address.toLowerCase(),
+          identifierKind: IdentifierKind.Ethereum,
+        }),
+        signMessage: async (message) => {
+          const sig = await walletClient.signMessage({ account: address, message })
+          return toBytes(sig)
+        },
+        getChainId: () => BigInt(2741), // Abstract Mainnet chain ID
       }
+      const encKey = crypto.getRandomValues(new Uint8Array(32))
+      const client = await Client.create(signer, {
+        env: 'production',
+        dbEncryptionKey: encKey,
+      })
+      setXmtpClient(client)
+      await loadMessages(client)
+      startStream(client)
+    } catch (e) {
+      console.error('XMTP init error:', e)
+      setXmtpError('Could not connect to XMTP. Messages will load when you send or receive one.')
+    } finally {
+      setXmtpLoading(false)
+    }
+  }
+
+  async function loadMessages(client) {
+    try {
+      await client.conversations.sync()
+      const convos = await client.conversations.list()
+      const inbox = []
+      const sent = []
+      for (const convo of convos) {
+        await convo.sync()
+        const msgs = await convo.messages()
+        for (const msg of msgs) {
+          const mail = msgToMail(msg, address)
+          if (mail.isSent) sent.push(mail)
+          else inbox.push(mail)
+        }
+      }
+      inbox.sort((a,b) => b.id.localeCompare(a.id))
+      sent.sort((a,b) => b.id.localeCompare(a.id))
+      setXmtpMails(inbox)
+      setXmtpSent(sent)
+    } catch (e) {
+      console.error('XMTP load error:', e)
+    }
+  }
+
+  function startStream(client) {
+    if (streamRef.current) return
+    ;(async () => {
+      try {
+        const stream = await client.conversations.streamAllMessages()
+        streamRef.current = stream
+        for await (const msg of stream) {
+          const mail = msgToMail(msg, address)
+          if (mail.isSent) {
+            setXmtpSent(p => [mail, ...p.filter(m => m.id !== mail.id)])
+          } else {
+            setXmtpMails(p => [mail, ...p.filter(m => m.id !== mail.id)])
+          }
+        }
+      } catch (e) {
+        console.error('XMTP stream error:', e)
+      }
+    })()
+  }
+
+  // ── Close dropdown ─────────────────────────────────────────────────────────
+  useEffect(() => {
+    const handler = e => {
+      if (!e.target.closest('.wallet-pill') && !e.target.closest('.logout-dropdown'))
+        setShowLogout(false)
     }
     document.addEventListener('mousedown', handler)
-    return ()=>document.removeEventListener('mousedown', handler)
-  },[])
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
 
-  const handleConnect = useCallback(async()=>{
+  // ── Cleanup stream on unmount ──────────────────────────────────────────────
+  useEffect(() => () => { if (streamRef.current) streamRef.current.return?.() }, [])
+
+  const handleConnect = useCallback(async () => {
     setConnecting(true)
-    try { await login() } catch(e){ console.error(e) } finally { setConnecting(false) }
-  },[login])
+    try { await login() } catch (e) { console.error(e) } finally { setConnecting(false) }
+  }, [login])
 
-  const ENC_KEY = address || 'absmail-key'
+  // ── Mail lists ─────────────────────────────────────────────────────────────
+  const allInbox = [founderMsg, ...xmtpMails]
+  const allSent = xmtpSent
 
   const getMails = () => {
-    if(view==='sent') return sent
-    if(view==='starred') return [...inbox,...sent].filter(m=>starred[m.id]||m.starred)
-    if(view==='transactions') return [...inbox,...sent].filter(m=>m.txHash)
-    if(['drafts','trash','contacts'].includes(view)) return []
-    return inbox
+    const all = [...allInbox, ...allSent]
+    if (view === 'sent') return allSent
+    if (view === 'starred') return all.filter(m => starred[m.id] || m.starred)
+    if (view === 'transactions') return allInbox.filter(m => m.txHash)
+    if (['drafts','trash','contacts'].includes(view)) return []
+    return allInbox
   }
 
   const filtered = getMails()
-    .filter(m => tab==='unread' ? m.unread : true)
     .filter(m => !search ||
       m.subject.toLowerCase().includes(search.toLowerCase()) ||
       (m.fromShort||'').toLowerCase().includes(search.toLowerCase()) ||
       (m.preview||'').toLowerCase().includes(search.toLowerCase())
     )
+    .filter(m => tab === 'unread' ? m.unread : true)
 
-  const selected = [...inbox,...sent].find(m=>m.id===selectedId) || null
-  const unread = inbox.filter(m=>m.unread).length
+  const allMails = [...allInbox, ...allSent]
+  const selected = allMails.find(m => m.id === selectedId) || null
+  const unread = allInbox.filter(m => m.unread).length
 
   const handleSelect = id => {
     setSelectedId(id)
-    setInbox(p=>p.map(m=>m.id===id?{...m,unread:false}:m))
-  }
-
-  const toggleStar = id => {
-    const all = [...inbox,...sent]
-    const m = all.find(x=>x.id===id)
-    if(!m) return
-    if(m.isFounder) {
-      setInbox(p=>p.map(x=>x.id===id?{...x,starred:!x.starred}:x))
+    if (id === 'founder-1') {
+      setFounderMsg(p => ({ ...p, unread: false }))
     } else {
-      setStarred(s=>({...s,[id]:!s[id]}))
+      setXmtpMails(p => p.map(m => m.id === id ? { ...m, unread: false } : m))
     }
   }
 
-  const handleSend = async({to, subject, body, encrypted}) => {
-    setComposing(false); setStep(1)
+  const toggleStar = id => {
+    if (id === 'founder-1') {
+      setFounderMsg(p => ({ ...p, starred: !p.starred }))
+    } else {
+      setStarred(s => ({ ...s, [id]: !s[id] }))
+    }
+  }
+
+  // ── Send via XMTP ──────────────────────────────────────────────────────────
+  const handleSend = async ({ to, subject, body }) => {
+    setComposing(false)
+    setStep(1)
     try {
-      await delay(700); setStep(2)
-      const finalBody = encrypted ? encryptMsg(body, ENC_KEY) : body
-      let hash = '0x'+randomHex(64)
-      if(abstractClient){
+      await delay(600); setStep(2)
+      const payload = JSON.stringify({ subject, body, ts: Date.now() })
+      let txHash = null
+
+      if (xmtpClient) {
+        // Resolve address — if username, get address first
+        let toAddr = to
+        if (!to.startsWith('0x')) {
+          try {
+            const res = await fetch(`https://auth.privy.io/api/v1/users/username/${to}`, {
+              headers: { 'privy-app-id': PRIVY_APP_ID, 'Content-Type': 'application/json' }
+            })
+            if (res.ok) {
+              const data = await res.json()
+              const wallet = data.linked_accounts?.find(a => a.type === 'wallet' || a.type === 'smart_wallet')
+              if (wallet?.address) toAddr = wallet.address
+            }
+          } catch {}
+        }
+        setStep(3)
+        // Check if recipient is on XMTP
+        const canMessage = await Client.canMessage([{ identifier: toAddr.toLowerCase(), identifierKind: IdentifierKind.Ethereum }])
+        if (canMessage?.get(toAddr.toLowerCase())) {
+          const convo = await xmtpClient.conversations.newDm(toAddr)
+          await convo.send(payload)
+        } else {
+          console.warn('Recipient not on XMTP, sending via chain tx only')
+        }
+      }
+
+      // Also send as Abstract Chain tx for permanence
+      if (abstractClient) {
         try {
-          const bytes = new TextEncoder().encode(JSON.stringify({to,subject,body:finalBody,encrypted,ts:Date.now()}))
-          const hex = '0x'+Array.from(bytes).map(b=>b.toString(16).padStart(2,'0')).join('')
-          hash = await abstractClient.sendTransaction({to:address, data:hex, value:0n})
-        } catch(e){ console.warn('tx error:', e) }
+          const bytes = new TextEncoder().encode(payload)
+          const hex = '0x' + Array.from(bytes).map(b => b.toString(16).padStart(2,'0')).join('')
+          txHash = await abstractClient.sendTransaction({ to: address, data: hex, value: 0n })
+        } catch (e) { console.warn('tx error:', e) }
       }
-      setStep(3); await delay(900); setStep(4); await delay(700)
+
+      setStep(4); await delay(700)
       const m = {
-        id: Date.now(),
-        from: address||'you', fromShort: userProfile.name || shortAddr(address),
-        fromInitials:'ME', fromAvatar: userProfile.avatar,
-        subject, preview: body.slice(0,80),
-        body: encrypted ? finalBody : body, encrypted,
-        time: new Date().toLocaleTimeString('en',{hour:'2-digit',minute:'2-digit'}),
-        date:'Today', txHash: hash,
-        unread:false, starred:false, tags:['sent']
+        id: 'sent-' + Date.now(),
+        from: address || 'you',
+        fromShort: userProfile.name || shortAddr(address) || 'you',
+        fromInitials: 'ME',
+        fromAvatar: userProfile.avatar,
+        subject, preview: body.slice(0, 80), body,
+        time: new Date().toLocaleTimeString('en', { hour:'2-digit', minute:'2-digit' }),
+        date: 'Today', txHash,
+        encrypted: true, unread: false, starred: false,
+        tags: [], permanent: false, xmtp: true, isSent: true,
       }
-      setSent(p=>[m,...p]); setView('sent'); setSelectedId(m.id); setStep(0)
-      setToast({show:true, hash}); setTimeout(()=>setToast(t=>({...t,show:false})), 5000)
-    } catch(e){ console.error(e); setStep(0) }
+      setXmtpSent(p => [m, ...p])
+      setView('sent'); setSelectedId(m.id); setStep(0)
+      setToast({ show: true, hash: txHash || '' })
+      setTimeout(() => setToast(t => ({ ...t, show: false })), 5000)
+    } catch (e) {
+      console.error('Send error:', e)
+      setStep(0)
+    }
   }
 
   const navItems = [
-    { id:'inbox', label:'Inbox', badge:unread, icon:<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11L2 12v6a2 2 0 002 2h16a2 2 0 002-2v-6l-3.45-6.89A2 2 0 0016.76 4H7.24a2 2 0 00-1.79 1.11z"/></svg> },
-    { id:'sent', label:'Sent', icon:<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg> },
-    { id:'starred', label:'Starred', icon:<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg> },
-    { id:'drafts', label:'Drafts', icon:<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg> },
-    { id:'trash', label:'Trash', icon:<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a1 1 0 011-1h4a1 1 0 011 1v2"/></svg> },
+    { id:'inbox', label:'Inbox', badge:unread, icon:<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11L2 12v6a2 2 0 002 2h16a2 2 0 002-2v-6l-3.45-6.89A2 2 0 0016.76 4H7.24a2 2 0 00-1.79 1.11z"/></svg> },
+    { id:'sent', label:'Sent', icon:<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg> },
+    { id:'starred', label:'Starred', icon:<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg> },
+    { id:'drafts', label:'Drafts', icon:<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg> },
+    { id:'trash', label:'Trash', icon:<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a1 1 0 011-1h4a1 1 0 011 1v2"/></svg> },
   ]
 
-  if(!isConnected) return (
+  // ── LANDING ────────────────────────────────────────────────────────────────
+  if (!isConnected) return (
     <div className="landing">
       <div className="landing-bg">
         <div className="landing-grid"/>
@@ -351,32 +527,39 @@ export default function App() {
         <p className="landing-sub">Encrypted messaging built on Abstract. Every message is a transaction — no servers, no middlemen, no censorship.</p>
         <button className="btn-connect" onClick={handleConnect} disabled={connecting}>
           {connecting
-            ? <><div style={{width:'16px',height:'16px',border:'2px solid rgba(0,0,0,.3)',borderTopColor:'#080c0a',borderRadius:'50%',animation:'spin .8s linear infinite'}}/>Connecting...</>
-            : <><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>Sign in with AGW</>
+            ? <><div style={{width:'16px',height:'16px',border:'2px solid rgba(0,0,0,.3)',borderTopColor:'#080c0a',borderRadius:'50%',animation:'spin .8s linear infinite'}}/> Connecting...</>
+            : <><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg> Sign in with AGW</>
           }
         </button>
       </div>
     </div>
   )
 
+  // ── MAIN APP ───────────────────────────────────────────────────────────────
   return (
     <>
+      {/* TOPBAR */}
       <div className="topbar">
-        <div className="topbar-logo" style={{userSelect:'none',WebkitUserSelect:'none',letterSpacing:'-.08em'}}>
-          <span style={{fontFamily:"'Space Grotesk',sans-serif",fontWeight:700,fontSize:'15px',color:'var(--text-primary)'}}>abs</span>
+        <div className="topbar-logo" style={{userSelect:'none',WebkitUserSelect:'none',letterSpacing:'-.01em'}}>
+          <span style={{color:'var(--text-primary)',fontWeight:700,fontSize:'15px'}}>abs</span>
           <span style={{color:'var(--abs-green)',fontWeight:700,fontSize:'15px'}}>.</span>
-          <span style={{fontFamily:"'Space Grotesk',sans-serif",fontWeight:700,fontSize:'15px',color:'var(--text-primary)'}}>mail</span>
+          <span style={{color:'var(--text-primary)',fontWeight:700,fontSize:'15px'}}>mail</span>
         </div>
         <div className="topbar-search">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-          <input placeholder="Search messages..." value={search} onChange={e=>setSearch(e.target.value)}/>
-          {search && <button onClick={()=>setSearch('')} style={{background:'none',border:'none',cursor:'pointer',color:'var(--text-muted)',display:'flex',padding:'0'}}>
+          <input placeholder="Search messages..." value={search} onChange={e => setSearch(e.target.value)}/>
+          {search && <button onClick={() => setSearch('')} style={{background:'none',border:'none',cursor:'pointer',color:'var(--text-muted)',display:'flex',padding:0}}>
             <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
           </button>}
         </div>
         <div className="topbar-right">
+          {/* XMTP status indicator */}
+          {isConnected && (
+            <div title={xmtpClient ? 'XMTP connected' : xmtpLoading ? 'Connecting...' : 'XMTP offline'}
+              style={{width:'7px',height:'7px',borderRadius:'50%',background: xmtpClient ? 'var(--abs-green)' : xmtpLoading ? '#ffaa00' : '#ff4444',flexShrink:0,animation: xmtpClient ? 'blink 2s infinite' : 'none'}}/>
+          )}
           <div style={{position:'relative'}}>
-            <div className="wallet-pill" onClick={()=>setShowLogout(s=>!s)}>
+            <div className="wallet-pill" onClick={() => setShowLogout(s => !s)}>
               <div className="wallet-avatar" style={{overflow:'hidden'}}>
                 {userProfile.avatar
                   ? <img src={userProfile.avatar} alt="" style={{width:'100%',height:'100%',objectFit:'cover',borderRadius:'50%'}}/>
@@ -384,15 +567,15 @@ export default function App() {
                 }
               </div>
               {userProfile.name || shortAddr(address)}
-              <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{opacity:.5,transition:'transform .2s',transform:showLogout?'rotate(180deg)':'none'}}><polyline points="6 9 12 15 18 9"/></svg>
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{opacity:.5,transition:'transform .2s',transform:showLogout?'rotate(180deg)':'none'}}><polyline points="6 9 12 15 18 9"/></svg>
             </div>
             {showLogout && (
               <div className="logout-dropdown" style={{position:'absolute',top:'calc(100% + 6px)',right:0,background:'var(--bg-card)',border:'1px solid var(--abs-green-border)',borderRadius:'10px',overflow:'hidden',zIndex:9999,boxShadow:'0 8px 24px rgba(0,0,0,.6)',minWidth:'200px',animation:'fadeInUp .15s ease'}}>
                 <div style={{padding:'10px 14px',borderBottom:'1px solid var(--border)',display:'flex',alignItems:'center',gap:'10px'}}>
-                  <div style={{width:'34px',height:'34px',borderRadius:'50%',overflow:'hidden',flexShrink:0,border:'1px solid var(--abs-green-border)'}}>
+                  <div style={{width:'32px',height:'32px',borderRadius:'50%',overflow:'hidden',flexShrink:0,border:'1px solid var(--abs-green-border)'}}>
                     {userProfile.avatar
                       ? <img src={userProfile.avatar} alt="" style={{width:'100%',height:'100%',objectFit:'cover'}}/>
-                      : <div style={{width:'100%',height:'100%',background:'linear-gradient(135deg,var(--abs-green),#00cc6a)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'.65rem',color:'#080c0a',fontWeight:700}}>{address?.slice(2,4).toUpperCase()}</div>
+                      : <div style={{width:'100%',height:'100%',background:'linear-gradient(135deg,var(--abs-green),#00cc6a)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'.6rem',color:'#080c0a',fontWeight:700}}>{address?.slice(2,4).toUpperCase()}</div>
                     }
                   </div>
                   <div>
@@ -400,11 +583,17 @@ export default function App() {
                     <div style={{fontSize:'.65rem',color:'var(--text-muted)',fontFamily:'var(--font-mono)'}}>{shortAddr(address)} · Abstract</div>
                   </div>
                 </div>
-                <a href={`https://portal.abs.xyz/profile/${address}`} target="_blank" rel="noreferrer" style={{display:'flex',alignItems:'center',gap:'8px',padding:'9px 14px',textDecoration:'none',color:'var(--text-secondary)',fontSize:'.8rem',borderBottom:'1px solid var(--border)',transition:'background .1s'}} onMouseEnter={e=>e.currentTarget.style.background='var(--bg-hover)'} onMouseLeave={e=>e.currentTarget.style.background='none'}>
+                <a href={`https://portal.abs.xyz/profile/${address}`} target="_blank" rel="noreferrer"
+                  style={{display:'flex',alignItems:'center',gap:'8px',padding:'9px 14px',textDecoration:'none',color:'var(--text-secondary)',fontSize:'.8rem',borderBottom:'1px solid var(--border)',transition:'background .1s'}}
+                  onMouseEnter={e=>e.currentTarget.style.background='var(--bg-hover)'}
+                  onMouseLeave={e=>e.currentTarget.style.background='none'}>
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
                   View Portal Profile
                 </a>
-                <button onClick={()=>{setShowLogout(false);logout()}} style={{display:'flex',alignItems:'center',gap:'8px',padding:'9px 14px',width:'100%',background:'none',border:'none',cursor:'pointer',color:'#ff5050',fontSize:'.8rem',fontFamily:'var(--font-main)',textAlign:'left',transition:'background .1s'}} onMouseEnter={e=>e.currentTarget.style.background='rgba(255,80,80,.08)'} onMouseLeave={e=>e.currentTarget.style.background='none'}>
+                <button onClick={() => { setShowLogout(false); logout() }}
+                  style={{display:'flex',alignItems:'center',gap:'8px',padding:'9px 14px',width:'100%',background:'none',border:'none',cursor:'pointer',color:'#ff5050',fontSize:'.8rem',fontFamily:'var(--font-main)',textAlign:'left',transition:'background .1s'}}
+                  onMouseEnter={e=>e.currentTarget.style.background='rgba(255,80,80,.08)'}
+                  onMouseLeave={e=>e.currentTarget.style.background='none'}>
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
                   Disconnect Wallet
                 </button>
@@ -415,30 +604,44 @@ export default function App() {
       </div>
 
       <div className="app-layout">
+        {/* SIDEBAR */}
         <div className="sidebar">
           <div className="sidebar-inner">
-            <button className="btn-compose" onClick={()=>{setReplyTo('');setComposing(true)}}>
+            <button className="btn-compose" onClick={() => { setReplyTo(''); setComposing(true) }}>
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
               Compose
             </button>
             <div className="sidebar-section">
               <div className="sidebar-section-label">Mail</div>
-              {navItems.map(({id,label,badge,icon})=>(
-                <button key={id} className={`nav-item ${view===id?'active':''}`} onClick={()=>{setView(id);setSelectedId(null)}}>
-                  <span className="nav-icon">{icon}</span>{label}
-                  {badge>0&&<span className="nav-badge">{badge}</span>}
+              {navItems.map(({ id, label, badge, icon }) => (
+                <button key={id} className={`nav-item ${view===id?'active':''}`} onClick={() => { setView(id); setSelectedId(null) }}>
+                  <span className="nav-icon">{icon}</span>
+                  {label}
+                  {badge > 0 && <span className="nav-badge">{badge}</span>}
                 </button>
               ))}
             </div>
             <div className="sidebar-divider"/>
             <div className="sidebar-section">
               <div className="sidebar-section-label">Chain</div>
-              <button className={`nav-item ${view==='transactions'?'active':''}`} onClick={()=>{setView('transactions');setSelectedId(null)}}>
+              <button className={`nav-item ${view==='transactions'?'active':''}`} onClick={() => { setView('transactions'); setSelectedId(null) }}>
                 <span className="nav-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/></svg></span>
                 Transactions
               </button>
             </div>
             <div className="sidebar-divider"/>
+            {/* XMTP status */}
+            {xmtpError && (
+              <div style={{padding:'8px',background:'rgba(255,100,50,.08)',border:'1px solid rgba(255,100,50,.2)',borderRadius:'7px',fontSize:'10px',color:'rgba(255,150,100,.8)',fontFamily:'var(--font-mono)',marginBottom:'8px',lineHeight:1.4}}>
+                ⚠ {xmtpError}
+              </div>
+            )}
+            {xmtpLoading && (
+              <div style={{padding:'8px',background:'var(--abs-green-pale)',border:'1px solid var(--abs-green-border)',borderRadius:'7px',fontSize:'10px',color:'var(--abs-green)',fontFamily:'var(--font-mono)',marginBottom:'8px',display:'flex',alignItems:'center',gap:'6px'}}>
+                <div style={{width:'5px',height:'5px',borderRadius:'50%',background:'var(--abs-green)',animation:'blink .8s infinite',flexShrink:0}}/>
+                Connecting to XMTP...
+              </div>
+            )}
             <div className="chain-info">
               <div className="chain-info-label">Network</div>
               <div className="chain-info-row">
@@ -449,28 +652,29 @@ export default function App() {
           </div>
         </div>
 
+        {/* MAIL LIST */}
         <div className="maillist">
           <div className="maillist-header">
-            <div className="maillist-title">{{inbox:'Inbox',sent:'Sent',starred:'Starred',drafts:'Drafts',trash:'Trash',transactions:'Transactions'}[view]||view}</div>
+            <div className="maillist-title">{{ inbox:'Inbox',sent:'Sent',starred:'Starred',drafts:'Drafts',trash:'Trash',transactions:'Transactions' }[view] || view}</div>
             <div className="maillist-tabs">
-              {['all','unread'].map(t=>(
-                <button key={t} className={`mail-tab ${tab===t?'active':''}`} onClick={()=>setTab(t)}>
-                  {t==='all'?'All':'Unread'}
+              {['all','unread'].map(t => (
+                <button key={t} className={`mail-tab ${tab===t?'active':''}`} onClick={() => setTab(t)}>
+                  {t === 'all' ? 'All' : 'Unread'}
                 </button>
               ))}
             </div>
           </div>
           <div className="maillist-scroll">
-            {filtered.length===0
+            {filtered.length === 0
               ? <div className="no-mail">
                   <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" style={{opacity:.3}}><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11L2 12v6a2 2 0 002 2h16a2 2 0 002-2v-6l-3.45-6.89A2 2 0 0016.76 4H7.24a2 2 0 00-1.79 1.11z"/></svg>
-                  <div>{search?`No results for "${search}"`:'No messages'}</div>
+                  <div>{search ? `No results for "${search}"` : 'No messages'}</div>
                 </div>
-              : filtered.map((m,idx)=>(
+              : filtered.map((m, idx) => (
                 <div key={m.id}
                   className={`mail-item ${m.unread?'unread':''} ${selectedId===m.id?'active':''}`}
-                  style={{animationDelay:`${idx*.04}s`}}
-                  onClick={()=>handleSelect(m.id)}
+                  style={{ animationDelay: `${idx*.04}s` }}
+                  onClick={() => handleSelect(m.id)}
                 >
                   <div className="mail-item-top">
                     <div className="mail-avatar-sm">
@@ -479,29 +683,28 @@ export default function App() {
                         : m.fromInitials
                       }
                     </div>
-                    <div className="mail-from">{m.fromShort||shortAddr(m.from)}</div>
+                    <div className="mail-from">{m.fromShort || shortAddr(m.from)}</div>
                     <div className="mail-time">{m.time}</div>
                   </div>
                   <div className="mail-subject">{m.subject}</div>
                   <div className="mail-preview">{m.preview}</div>
-                  {m.tags&&m.tags.length>0&&(
-                    <div className="mail-tags">
-                      {m.encrypted&&<span className="mail-tag" style={{display:'flex',alignItems:'center',gap:'3px'}}>
-                        <svg width="7" height="7" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>enc
-                      </span>}
-                      {m.tags.filter(t=>t!=='sent').map(t=><span key={t} className="mail-tag">{t}</span>)}
-                    </div>
-                  )}
+                  <div className="mail-tags">
+                    {m.encrypted && <span className="mail-tag" style={{display:'flex',alignItems:'center',gap:'3px'}}>
+                      <svg width="7" height="7" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>enc
+                    </span>}
+                    {m.id === 'founder-1' && <span className="mail-tag">founder</span>}
+                  </div>
                 </div>
               ))
             }
           </div>
         </div>
 
+        {/* MAIL VIEWER */}
         <div className="mailview">
           {!selected
             ? <div className="mail-empty">
-                <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" style={{opacity:.18}}><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11L2 12v6a2 2 0 002 2h16a2 2 0 002-2v-6l-3.45-6.89A2 2 0 0016.76 4H7.24a2 2 0 00-1.79 1.11z"/></svg>
+                <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" style={{opacity:.2}}><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11L2 12v6a2 2 0 002 2h16a2 2 0 002-2v-6l-3.45-6.89A2 2 0 0016.76 4H7.24a2 2 0 00-1.79 1.11z"/></svg>
                 <div className="mail-empty-text">Select a message to read</div>
               </div>
             : <div className="mailview-inner">
@@ -514,61 +717,83 @@ export default function App() {
                     }
                   </div>
                   <div className="mail-meta-details">
-                    <div className="mail-from-full">{selected.fromShort||shortAddr(selected.from)}</div>
+                    <div className="mail-from-full">{selected.fromShort || shortAddr(selected.from)}</div>
                     <div className="mail-addr">{shortAddr(selected.from)}</div>
                   </div>
                   <div className="mail-date-full">{selected.date}, {selected.time}</div>
                   <div className="mail-actions-top">
-                    <button className="action-btn" onClick={()=>{setReplyTo(selected.fromShort||selected.from);setComposing(true)}}>
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="9 17 4 12 9 7"/><path d="M20 18v-2a4 4 0 00-4-4H4"/></svg>Reply
+                    <button className="action-btn" onClick={() => { setReplyTo(selected.fromShort || selected.from); setComposing(true) }}>
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="9 17 4 12 9 7"/><path d="M20 18v-2a4 4 0 00-4-4H4"/></svg>Reply
                     </button>
-                    <button className="action-btn" onClick={()=>toggleStar(selected.id)}>
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill={starred[selected.id]||selected.starred?'var(--abs-green)':'none'} stroke="var(--abs-green)" strokeWidth="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                    <button className="action-btn" onClick={() => toggleStar(selected.id)}>
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill={starred[selected.id]||selected.starred?'var(--abs-green)':'none'} stroke="var(--abs-green)" strokeWidth="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
                       {starred[selected.id]||selected.starred?'Unstar':'Star'}
                     </button>
-                    {!selected.isFounder && (
-                      <button className="action-btn" onClick={()=>{
-                        setInbox(p=>p.filter(m=>m.id!==selected.id))
-                        setSent(p=>p.filter(m=>m.id!==selected.id))
+                    {!selected.permanent && (
+                      <button className="action-btn" onClick={() => {
+                        setXmtpMails(p => p.filter(m => m.id !== selected.id))
+                        setXmtpSent(p => p.filter(m => m.id !== selected.id))
                         setSelectedId(null)
                       }}>
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a1 1 0 011-1h4a1 1 0 011 1v2"/></svg>Delete
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a1 1 0 011-1h4a1 1 0 011 1v2"/></svg>Delete
                       </button>
                     )}
                   </div>
                 </div>
-                <div style={{display:'flex',gap:'8px',flexWrap:'wrap',marginBottom:'18px'}}>
-                  {selected.txHash && (
-                    <a href={`https://abscan.org/tx/${selected.txHash}`} target="_blank" rel="noreferrer" className="txn-badge">
-                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/></svg>
-                      Tx: <strong>{shortAddr(selected.txHash)}</strong> · Abstract
-                      <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{opacity:.6}}><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-                    </a>
-                  )}
+                <div style={{display:'flex',gap:'8px',flexWrap:'wrap',marginBottom:'20px'}}>
                   {selected.encrypted && (
                     <div className="enc-badge">
                       <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
                       End-to-end encrypted
                     </div>
                   )}
+                  {selected.xmtp && (
+                    <div className="enc-badge" style={{color:'var(--abs-green)',borderColor:'var(--abs-green-border)'}}>
+                      <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
+                      XMTP · Decentralized
+                    </div>
+                  )}
                 </div>
-                <div className="mail-body">
-                  {selected.encrypted ? decryptMsg(selected.body, ENC_KEY) : selected.body}
-                </div>
+                <div className="mail-body">{selected.body}</div>
               </div>
           }
         </div>
       </div>
 
-      {composing && (
-        <ComposeModal defaultTo={replyTo} onClose={()=>setComposing(false)} onSend={handleSend}/>
-      )}
+      {/* MOBILE BOTTOM NAV */}
+      <div className="mob-nav">
+        <div className="mob-nav-inner">
+          {[
+            {id:'inbox',label:'Inbox',badge:unread,icon:<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11L2 12v6a2 2 0 002 2h16a2 2 0 002-2v-6l-3.45-6.89A2 2 0 0016.76 4H7.24a2 2 0 00-1.79 1.11z"/></svg>},
+            {id:'sent',label:'Sent',icon:<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>},
+            {id:'starred',label:'Starred',icon:<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>},
+            {id:'transactions',label:'Chain',icon:<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/></svg>},
+          ].map(({ id, label, badge, icon }) => (
+            <button key={id} className={`mob-btn ${view===id?'active':''}`} onClick={() => { setView(id); setSelectedId(null) }}>
+              {icon}
+              {badge > 0 && <span className="mob-badge">{badge}</span>}
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
 
-      {step>0 && (
+      {/* MOBILE COMPOSE FAB */}
+      <button className="mob-compose-fab" onClick={() => { setReplyTo(''); setComposing(true) }}>
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#080c0a" strokeWidth="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      </button>
+
+      {/* COMPOSE */}
+      {composing && <ComposeModal defaultTo={replyTo} onClose={() => setComposing(false)} onSend={handleSend}/>}
+
+      {/* SENDING OVERLAY */}
+      {step > 0 && (
         <div className="sending-overlay">
           <div className="sending-box">
             <div className="sending-animation">
-              <div className="sending-ring ring1"/><div className="sending-ring ring2"/><div className="sending-ring ring3"/>
+              <div className="sending-ring ring1"/>
+              <div className="sending-ring ring2"/>
+              <div className="sending-ring ring3"/>
               <div className="sending-center">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--abs-green)" strokeWidth="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
               </div>
@@ -578,13 +803,14 @@ export default function App() {
             <div className="sending-steps">
               {[
                 {id:1,label:'Signing with AGW wallet'},
-                {id:2,label:'Encrypting message'},
-                {id:3,label:'Broadcasting transaction'},
+                {id:2,label:'Encrypting via XMTP'},
+                {id:3,label:'Sending to recipient'},
                 {id:4,label:'Delivered on-chain'},
-              ].map(s=>(
+              ].map(s => (
                 <div key={s.id} className={`sending-step ${s.id<step?'done':s.id===step?'active':''}`}>
-                  <div className="step-dot"/>{s.label}
-                  {s.id<step&&<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--abs-green)" strokeWidth="3" style={{marginLeft:'auto'}}><polyline points="20 6 9 17 4 12"/></svg>}
+                  <div className="step-dot"/>
+                  {s.label}
+                  {s.id < step && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--abs-green)" strokeWidth="3" style={{marginLeft:'auto'}}><polyline points="20 6 9 17 4 12"/></svg>}
                 </div>
               ))}
             </div>
@@ -592,19 +818,20 @@ export default function App() {
         </div>
       )}
 
+      {/* TOAST */}
       <div className={`tx-toast ${toast.show?'show':''}`}>
         <div style={{width:'30px',height:'30px',borderRadius:'50%',background:'var(--abs-green-pale)',border:'1px solid var(--abs-green-border)',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--abs-green)" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg>
         </div>
         <div style={{flex:1}}>
-          <div className="toast-title">Message sent on Abstract Chain</div>
-          <div className="toast-hash">
+          <div className="toast-title">Message sent via XMTP · Abstract Chain</div>
+          {toast.hash && <div className="toast-hash">
             <a href={`https://abscan.org/tx/${toast.hash}`} target="_blank" rel="noreferrer" style={{color:'var(--abs-green)',textDecoration:'none'}}>
               Tx: {shortAddr(toast.hash)} ↗
             </a>
-          </div>
+          </div>}
         </div>
-        <button onClick={()=>setToast(t=>({...t,show:false}))} style={{background:'none',border:'none',cursor:'pointer',color:'var(--text-muted)',padding:'0',display:'flex'}}>
+        <button onClick={() => setToast(t => ({...t, show:false}))} style={{background:'none',border:'none',cursor:'pointer',color:'var(--text-muted)',display:'flex',padding:0}}>
           <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
         </button>
       </div>
