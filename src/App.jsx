@@ -223,6 +223,22 @@ export default function App() {
   const [search, setSearch] = useState('')
   const [userProfile, setUserProfile] = useState({name:null, avatar:null})
   const [loading, setLoading] = useState(false)
+  const [profiles, setProfiles] = useState({}) // addr -> {name, avatar}
+
+  // ── Fetch profile for any address, cache in state + Supabase ──────────────
+  const fetchProfile = useCallback(async (addr) => {
+    if (!addr || profiles[addr.toLowerCase()]) return
+    try {
+      const res = await fetch(`/api/resolve?address=${addr}`)
+      if (!res.ok) return
+      const data = await res.json()
+      const p = { name: data.username||null, avatar: data.avatar||null }
+      setProfiles(prev => ({...prev, [addr.toLowerCase()]: p}))
+      if (p.name || p.avatar) {
+        sb.from('users').upsert({ wallet_address: addr.toLowerCase(), username: p.name, avatar_url: p.avatar, updated_at: new Date().toISOString() }, { onConflict: 'wallet_address' }).catch(()=>{})
+      }
+    } catch {}
+  }, [profiles])
 
   // ── Block counter ──────────────────────────────────────────────────────────
   useEffect(() => {
@@ -267,6 +283,15 @@ export default function App() {
       if (meta['founder-1']) {
         setFounderMsg(p => ({...p, unread: meta['founder-1'].unread ?? true, starred: meta['founder-1'].starred ?? true}))
       }
+      // Fetch profiles for all unique senders
+      const uniqueAddrs = [...new Set([...inboxRows, ...sentRows].map(m => m.from).filter(Boolean))]
+      uniqueAddrs.forEach(addr => {
+        fetch(`/api/resolve?address=${addr}`).then(r => r.json()).then(data => {
+          if (data.username || data.avatar) {
+            setProfiles(prev => ({...prev, [addr.toLowerCase()]: {name: data.username||null, avatar: data.avatar||null}}))
+          }
+        }).catch(()=>{})
+      })
     } catch(e) { console.error('loadFromDB:', e) }
     finally { setLoading(false) }
   }
@@ -280,6 +305,7 @@ export default function App() {
         const name = data.username || null
         const avatar = data.avatar || null
         setUserProfile({ name, avatar })
+        setProfiles(prev => ({...prev, [address.toLowerCase()]: {name, avatar}}))
         if (name || avatar) {
           sb.from('users').upsert({ wallet_address: address.toLowerCase(), username: name, avatar_url: avatar, updated_at: new Date().toISOString() }, { onConflict: 'wallet_address' }).catch(() => {})
         }
@@ -553,11 +579,16 @@ export default function App() {
               <div className="no-mail"><div style={{width:'7px',height:'7px',borderRadius:'50%',background:'var(--abs-green)',animation:'blink .8s infinite'}}/>Loading...</div>
             ) : filtered.length===0 ? (
               <div className="no-mail"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" style={{opacity:.3}}><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11L2 12v6a2 2 0 002 2h16a2 2 0 002-2v-6l-3.45-6.89A2 2 0 0016.76 4H7.24a2 2 0 00-1.79 1.11z"/></svg><div>{search?`No results for "${search}"`:'No messages'}</div></div>
-            ) : filtered.map((m,idx)=>(
+            ) : filtered.map((m,idx)=>{
+              const p = profiles[m.from?.toLowerCase()] || {}
+              const displayName = p.name || m.fromShort || shortAddr(m.from)
+              const avatar = p.avatar || m.fromAvatar
+              const initials = displayName.slice(0,2).toUpperCase()
+              return (
               <div key={m.id} className={`mail-item ${m.unread?'unread':''} ${selectedId===m.id?'active':''}`} style={{animationDelay:`${idx*.04}s`}} onClick={()=>handleSelect(m.id)}>
                 <div className="mail-item-top">
-                  <div className="mail-avatar-sm">{m.fromAvatar?<img src={m.fromAvatar} alt="" style={{width:'100%',height:'100%',objectFit:'cover',borderRadius:'50%'}}/>:m.fromInitials}</div>
-                  <div className="mail-from">{m.fromShort||shortAddr(m.from)}</div>
+                  <div className="mail-avatar-sm">{avatar?<img src={avatar} alt="" style={{width:'100%',height:'100%',objectFit:'cover',borderRadius:'50%'}}/>:initials}</div>
+                  <div className="mail-from">{displayName}</div>
                   {m.unread && <div className="mail-unread-dot"/>}
                 </div>
                 <div className="mail-subject">{m.subject}</div>
@@ -571,7 +602,7 @@ export default function App() {
                   {m.id==='founder-1'&&<span className="mail-tag">founder</span>}
                 </div>
               </div>
-            ))}
+            )})
           </div>
         </div>
 
@@ -580,10 +611,15 @@ export default function App() {
             <div className="mail-empty"><svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" style={{opacity:.2}}><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11L2 12v6a2 2 0 002 2h16a2 2 0 002-2v-6l-3.45-6.89A2 2 0 0016.76 4H7.24a2 2 0 00-1.79 1.11z"/></svg><div className="mail-empty-text">Select a message to read</div></div>
           ) : (
             <div className="mailview-inner">
+              {(() => {
+                const p = profiles[selected.from?.toLowerCase()] || {}
+                const displayName = p.name || selected.fromShort || shortAddr(selected.from)
+                const avatar = p.avatar || selected.fromAvatar
+                return (<>
               <div className="mail-meta-bar">
-                <div className="mail-avatar-lg">{selected.fromAvatar?<img src={selected.fromAvatar} alt="" style={{width:'100%',height:'100%',objectFit:'cover',borderRadius:'50%'}}/>:selected.fromInitials}</div>
+                <div className="mail-avatar-lg">{avatar?<img src={avatar} alt="" style={{width:'100%',height:'100%',objectFit:'cover',borderRadius:'50%'}}/>:displayName.slice(0,2).toUpperCase()}</div>
                 <div className="mail-meta-details">
-                  <div className="mail-from-full">{selected.fromShort||shortAddr(selected.from)}</div>
+                  <div className="mail-from-full">{displayName}</div>
                   <div className="mail-addr">{shortAddr(selected.from)}</div>
                 </div>
                 <div className="mail-date-full">{selected.date}, {selected.time}</div>
@@ -606,6 +642,7 @@ export default function App() {
               </div>
               <div className="mail-subject-line">{selected.subject}</div>
               <div className="mail-body">{selected.body}</div>
+            </>)})()} 
             </div>
           )}
         </div>
