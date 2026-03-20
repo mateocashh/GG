@@ -3,8 +3,64 @@ import { useLoginWithAbstract, useAbstractClient } from '@abstract-foundation/ag
 import { useAccount, useWalletClient } from 'wagmi'
 import { Client, IdentifierKind } from '@xmtp/browser-sdk'
 import { toBytes } from 'viem'
+import { createClient } from '@supabase/supabase-js'
 
 const PRIVY_APP_ID = 'clpispdty00yfmi08jf7pi18p'
+const SUPABASE_URL = 'https://ezpfolazaxdzenvgnait.supabase.co'
+const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImV6cGZvbGF6YXhkemVudmduYWl0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQwMTY2MDEsImV4cCI6MjA4OTU5MjYwMX0.YRur1TQdwKjcZqfdr88ZohFzOyouOuqgiQeGhL6qWHk'
+const supabase = createClient(SUPABASE_URL, SUPABASE_ANON)
+
+// ── Supabase helpers ──────────────────────────────────────────────────────────
+async function sbGetMeta(wallet, messageId) {
+  const { data } = await supabase
+    .from('message_meta')
+    .select('*')
+    .eq('wallet_address', wallet.toLowerCase())
+    .eq('message_id', messageId)
+    .single()
+  return data
+}
+
+async function sbUpsertMeta(wallet, messageId, updates) {
+  await supabase.from('message_meta').upsert({
+    wallet_address: wallet.toLowerCase(),
+    message_id: messageId,
+    ...updates,
+  }, { onConflict: 'wallet_address,message_id' })
+}
+
+async function sbLoadAllMeta(wallet) {
+  const { data } = await supabase
+    .from('message_meta')
+    .select('*')
+    .eq('wallet_address', wallet.toLowerCase())
+  return data || []
+}
+
+async function sbCacheMessage(wallet, mail) {
+  await supabase.from('cached_messages').upsert({
+    wallet_address: wallet.toLowerCase(),
+    message_id: mail.id,
+    from_address: mail.from,
+    from_short: mail.fromShort,
+    subject: mail.subject,
+    preview: mail.preview,
+    body: mail.body,
+    sent_at: new Date().toISOString(),
+    is_sent: mail.isSent || false,
+    is_xmtp: mail.xmtp || false,
+    conversation_id: mail.conversationId || null,
+  }, { onConflict: 'wallet_address,message_id' })
+}
+
+async function sbLoadCachedMessages(wallet) {
+  const { data } = await supabase
+    .from('cached_messages')
+    .select('*')
+    .eq('wallet_address', wallet.toLowerCase())
+    .order('sent_at', { ascending: false })
+  return data || []
+}
 
 // ── Founder welcome message (always pinned) ──────────────────────────────────
 const FOUNDER_MSG = {
@@ -332,10 +388,45 @@ export default function App() {
 
   async function loadMessages(client) {
     try {
+      // 1. Load from Supabase cache first (instant)
+      const cached = await sbLoadCachedMessages(address)
+      const meta = await sbLoadAllMeta(address)
+      const metaMap = Object.fromEntries(meta.map(m => [m.message_id, m]))
+
+      const toMail = row => ({
+        id: row.message_id,
+        from: row.from_address,
+        fromShort: row.from_short || shortAddr(row.from_address),
+        fromInitials: (row.from_short || row.from_address || '??').slice(0,2).toUpperCase(),
+        fromAvatar: null,
+        subject: row.subject || '(no subject)',
+        preview: row.preview || '',
+        body: row.body || '',
+        time: row.sent_at ? fmtTime(new Date(row.sent_at)) : '',
+        date: row.sent_at ? new Date(row.sent_at).toLocaleDateString('en',{month:'short',day:'numeric'}) : '',
+        txHash: null,
+        encrypted: true,
+        unread: metaMap[row.message_id]?.unread ?? true,
+        starred: metaMap[row.message_id]?.starred ?? false,
+        deleted: metaMap[row.message_id]?.deleted ?? false,
+        tags: [],
+        permanent: false,
+        xmtp: row.is_xmtp,
+        isSent: row.is_sent,
+        conversationId: row.conversation_id,
+      })
+
+      const cachedInbox = cached.filter(r => !r.is_sent && !metaMap[r.message_id]?.deleted).map(toMail)
+      const cachedSent = cached.filter(r => r.is_sent).map(toMail)
+      if (cachedInbox.length || cachedSent.length) {
+        setXmtpMails(cachedInbox)
+        setXmtpSent(cachedSent)
+      }
+
+      // 2. Sync fresh from XMTP in background
       await client.conversations.sync()
       const convos = await client.conversations.list()
-      const inbox = []
-      const sent = []
+      const inbox = [], sent = []
       for (const convo of convos) {
         await convo.sync()
         const msgs = await convo.messages()
@@ -343,12 +434,23 @@ export default function App() {
           const mail = msgToMail(msg, address)
           if (mail.isSent) sent.push(mail)
           else inbox.push(mail)
+          // Cache each message in Supabase
+          sbCacheMessage(address, mail).catch(() => {})
         }
       }
+
+      // Merge meta from Supabase
+      const applyMeta = mail => ({
+        ...mail,
+        unread: metaMap[mail.id]?.unread ?? mail.unread,
+        starred: metaMap[mail.id]?.starred ?? mail.starred,
+        deleted: metaMap[mail.id]?.deleted ?? false,
+      })
+
       inbox.sort((a,b) => b.id.localeCompare(a.id))
       sent.sort((a,b) => b.id.localeCompare(a.id))
-      setXmtpMails(inbox)
-      setXmtpSent(sent)
+      setXmtpMails(inbox.filter(m => !metaMap[m.id]?.deleted).map(applyMeta))
+      setXmtpSent(sent.map(applyMeta))
     } catch (e) {
       console.error('XMTP load error:', e)
     }
@@ -374,7 +476,13 @@ export default function App() {
     })()
   }
 
-  // ── Close dropdown ─────────────────────────────────────────────────────────
+  // ── Load founder msg meta from Supabase ───────────────────────────────────
+  useEffect(() => {
+    if (!address) return
+    sbGetMeta(address, 'founder-1').then(meta => {
+      if (meta) setFounderMsg(p => ({ ...p, unread: meta.unread ?? true, starred: meta.starred ?? true }))
+    }).catch(() => {})
+  }, [address])
   useEffect(() => {
     const handler = e => {
       if (!e.target.closest('.wallet-pill') && !e.target.closest('.logout-dropdown'))
@@ -421,16 +529,27 @@ export default function App() {
     setSelectedId(id)
     if (id === 'founder-1') {
       setFounderMsg(p => ({ ...p, unread: false }))
+      sbUpsertMeta(address, 'founder-1', { unread: false }).catch(() => {})
     } else {
       setXmtpMails(p => p.map(m => m.id === id ? { ...m, unread: false } : m))
+      sbUpsertMeta(address, id, { unread: false }).catch(() => {})
     }
   }
 
   const toggleStar = id => {
     if (id === 'founder-1') {
-      setFounderMsg(p => ({ ...p, starred: !p.starred }))
+      setFounderMsg(p => {
+        const next = !p.starred
+        sbUpsertMeta(address, 'founder-1', { starred: next }).catch(() => {})
+        return { ...p, starred: next }
+      })
     } else {
-      setStarred(s => ({ ...s, [id]: !s[id] }))
+      const all = [...xmtpMails, ...xmtpSent]
+      const m = all.find(x => x.id === id)
+      const next = !(m?.starred)
+      setXmtpMails(p => p.map(x => x.id === id ? { ...x, starred: next } : x))
+      setXmtpSent(p => p.map(x => x.id === id ? { ...x, starred: next } : x))
+      sbUpsertMeta(address, id, { starred: next }).catch(() => {})
     }
   }
 
@@ -492,6 +611,9 @@ export default function App() {
         tags: [], permanent: false, xmtp: true, isSent: true,
       }
       setXmtpSent(p => [m, ...p])
+      // Persist to Supabase
+      sbCacheMessage(address, m).catch(() => {})
+      sbUpsertMeta(address, m.id, { unread: false, starred: false }).catch(() => {})
       setView('sent'); setSelectedId(m.id); setStep(0)
       setToast({ show: true, hash: txHash || '' })
       setTimeout(() => setToast(t => ({ ...t, show: false })), 5000)
@@ -733,6 +855,7 @@ export default function App() {
                       <button className="action-btn" onClick={() => {
                         setXmtpMails(p => p.filter(m => m.id !== selected.id))
                         setXmtpSent(p => p.filter(m => m.id !== selected.id))
+                        sbUpsertMeta(address, selected.id, { deleted: true }).catch(() => {})
                         setSelectedId(null)
                       }}>
                         <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a1 1 0 011-1h4a1 1 0 011 1v2"/></svg>Delete
