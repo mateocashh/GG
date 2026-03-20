@@ -49,97 +49,114 @@ const FOUNDER_MSG = {
 
 // ── ToField ───────────────────────────────────────────────────────────────────
 function ToField({ value, onChange }) {
-  const [info, setInfo] = useState(null)
+  const [results, setResults] = useState([])
   const [loading, setLoading] = useState(false)
   const [focused, setFocused] = useState(false)
   const [selected, setSelected] = useState(false)
+  const [selectedUser, setSelectedUser] = useState(null)
 
   useEffect(() => {
-    // Reset selected state when value changes manually
     setSelected(false)
-    setInfo(null)
+    setSelectedUser(null)
+    setResults([])
     if (!value || value.length < 2) return
-    // Don't search if already a full address
+    // If full address typed, no need to search
     if (value.startsWith('0x') && value.length === 42) return
-    const isAddress = value.startsWith('0x') && value.length >= 10
+
     const timer = setTimeout(async () => {
       setLoading(true)
       try {
-        const endpoint = isAddress
-          ? `/api/resolve?address=${value}`
-          : `/api/resolve?username=${value}`
-        const res = await fetch(endpoint)
-        if (res.ok) {
-          const data = await res.json()
-          if (data.address || data.username) {
-            setInfo({ name: data.username, addr: data.address, avatar: data.avatar, found: true })
-          } else {
-            setInfo(null)
-          }
+        // Search Supabase users table first
+        const isAddr = value.startsWith('0x')
+        const { data } = isAddr
+          ? await sb.from('users').select('*').ilike('wallet_address', `%${value}%`).limit(5)
+          : await sb.from('users').select('*').ilike('username', `%${value}%`).limit(5)
+
+        if (data && data.length > 0) {
+          setResults(data)
         } else {
-          setInfo(null)
+          // Fallback to proxy API
+          const endpoint = isAddr
+            ? `/api/resolve?address=${value}`
+            : `/api/resolve?username=${value}`
+          const res = await fetch(endpoint)
+          if (res.ok) {
+            const d = await res.json()
+            if (d.address) {
+              setResults([{ wallet_address: d.address, username: d.username, avatar_url: d.avatar }])
+            } else {
+              setResults([])
+            }
+          } else {
+            setResults([])
+          }
         }
-      } catch {
-        setInfo(null)
-      } finally { setLoading(false) }
-    }, 500)
+      } catch { setResults([]) }
+      finally { setLoading(false) }
+    }, 400)
     return () => clearTimeout(timer)
   }, [value])
 
-  const handleSelect = (e) => {
-    e.preventDefault()
-    if (info?.addr) {
-      onChange(info.addr)
-      setSelected(true)
-      setFocused(false)
-      setInfo(null)
-    }
+  const handleSelect = (user) => {
+    onChange(user.wallet_address)
+    setSelected(true)
+    setSelectedUser(user)
+    setFocused(false)
+    setResults([])
   }
 
-  const show = focused && !selected && (loading || info)
-  const initials = value.startsWith('0x') ? value.slice(2,4).toUpperCase() : value.slice(0,2).toUpperCase()
+  const show = focused && !selected && (loading || results.length > 0)
 
   return (
     <div className="to-field-wrap">
       <div style={{display:'flex',alignItems:'center',gap:'6px',flex:1}}>
-        {selected && info?.avatar && (
-          <img src={info.avatar} alt="" style={{width:'18px',height:'18px',borderRadius:'50%',flexShrink:0,objectFit:'cover'}}/>
+        {selected && selectedUser?.avatar_url && (
+          <img src={selectedUser.avatar_url} alt="" style={{width:'18px',height:'18px',borderRadius:'50%',flexShrink:0,objectFit:'cover',border:'1px solid var(--abs-green-border)'}}/>
+        )}
+        {selected && selectedUser?.username && (
+          <span style={{fontSize:'.75rem',color:'var(--abs-green)',fontFamily:'var(--font-mono)',flexShrink:0}}>{selectedUser.username}</span>
         )}
         <input
           value={value}
-          onChange={e => { onChange(e.target.value); setSelected(false) }}
+          onChange={e => { onChange(e.target.value); setSelected(false); setSelectedUser(null) }}
           onFocus={() => setFocused(true)}
           onBlur={() => setTimeout(() => setFocused(false), 150)}
           placeholder="0x address or abstract username..."
-          style={{flex:1}}
+          style={{flex:1, display: selected && selectedUser?.username ? 'none' : 'block'}}
         />
       </div>
-      {show && loading && (
+      {show && (
         <div className="to-dropdown">
-          <div style={{display:'flex',alignItems:'center',gap:'8px',padding:'12px 14px',fontSize:'.78rem',color:'var(--text-muted)',fontFamily:'var(--font-mono)'}}>
-            <div style={{width:'7px',height:'7px',borderRadius:'50%',background:'var(--abs-green)',animation:'blink .8s infinite'}}/>
-            Looking up on Abstract...
-          </div>
-        </div>
-      )}
-      {show && info && !loading && (
-        <div className="to-dropdown">
-          <div style={{padding:'3px 14px',background:'rgba(0,255,133,.06)',borderBottom:'1px solid var(--border)',fontSize:'.62rem',color:'var(--abs-green)',fontFamily:'var(--font-mono)',letterSpacing:'.06em'}}>
-            ✦ ABSTRACT USER FOUND
-          </div>
-          <div className="to-dropdown-row" onMouseDown={handleSelect} style={{cursor:'pointer'}}>
-            <div className="to-avatar">
-              {info.avatar
-                ? <img src={info.avatar} alt="" style={{width:'100%',height:'100%',objectFit:'cover',borderRadius:'50%'}}/>
-                : <span style={{fontSize:'.7rem',fontWeight:'700',color:'var(--abs-green)',fontFamily:'var(--font-mono)'}}>{initials}</span>
-              }
+          {loading && (
+            <div style={{display:'flex',alignItems:'center',gap:'8px',padding:'10px 14px',fontSize:'.75rem',color:'var(--text-muted)',fontFamily:'var(--font-mono)'}}>
+              <div style={{width:'6px',height:'6px',borderRadius:'50%',background:'var(--abs-green)',animation:'blink .8s infinite'}}/>
+              Searching Abstract users...
             </div>
-            <div style={{flex:1,minWidth:0}}>
-              <div style={{fontSize:'.85rem',fontWeight:'600',color:'var(--text-primary)',marginBottom:'2px'}}>{info.name||value}</div>
-              <div style={{fontSize:'.7rem',color:'var(--text-secondary)',fontFamily:'var(--font-mono)'}}>{info.addr ? shortAddr(info.addr) : ''} · Abstract Portal</div>
+          )}
+          {!loading && results.map(user => (
+            <div key={user.wallet_address} className="to-dropdown-row" onMouseDown={() => handleSelect(user)}>
+              <div className="to-avatar">
+                {user.avatar_url
+                  ? <img src={user.avatar_url} alt="" style={{width:'100%',height:'100%',objectFit:'cover',borderRadius:'50%'}}/>
+                  : <span style={{fontSize:'.7rem',fontWeight:'700',color:'var(--abs-green)',fontFamily:'var(--font-mono)'}}>{(user.username||user.wallet_address).slice(0,2).toUpperCase()}</span>
+                }
+              </div>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontSize:'.85rem',fontWeight:'600',color:'var(--text-primary)',marginBottom:'1px',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+                  {user.username || shortAddr(user.wallet_address)}
+                </div>
+                <div style={{fontSize:'.68rem',color:'var(--text-secondary)',fontFamily:'var(--font-mono)'}}>
+                  {shortAddr(user.wallet_address)} · Abstract
+                </div>
+              </div>
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--abs-green)" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>
             </div>
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--abs-green)" strokeWidth="2"><polyline points="20 6 9 17 4 12"/></svg>
-          </div>
+          ))}
+          {!loading && results.length === 0 && value.length >= 2 && (
+            <div style={{padding:'10px 14px',fontSize:'.75rem',color:'var(--text-muted)',fontFamily:'var(--font-mono)'}}>
+              No Abstract users found
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -254,12 +271,28 @@ export default function App() {
     finally { setLoading(false) }
   }
 
-  // ── User profile ───────────────────────────────────────────────────────────
+  // ── Save user profile to Supabase on login ────────────────────────────────
   useEffect(() => {
     if (!address) return
+    // Fetch profile then save to users table
     fetch(`/api/resolve?address=${address}`)
       .then(r => r.json())
-      .then(data => setUserProfile({name: data.username||null, avatar: data.avatar||null}))
+      .then(data => {
+        const name = data.username || null
+        const avatar = data.avatar || null
+        setUserProfile({ name, avatar })
+        // Save to Supabase users table so others can find us
+        if (name || avatar) {
+          sb.from('users').upsert({
+            wallet_address: address.toLowerCase(),
+            username: name,
+            avatar_url: avatar,
+            updated_at: new Date().toISOString(),
+          }, { onConflict: 'wallet_address' }).then(({error}) => {
+            if (error) console.error('save user:', error.message)
+          })
+        }
+      })
       .catch(() => {})
   }, [address])
 
