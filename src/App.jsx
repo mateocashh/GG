@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useLoginWithAbstract, useAbstractClient } from '@abstract-foundation/agw-react'
 import { useAccount } from 'wagmi'
-import { usePrivy } from '@privy-io/react-auth'
+import { usePrivy } from '@abstract-foundation/agw-react'
 import { createClient } from '@supabase/supabase-js'
 
 const PRIVY_APP_ID = 'clpispdty00yfmi08jf7pi18p'
