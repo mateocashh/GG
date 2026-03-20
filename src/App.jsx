@@ -333,38 +333,18 @@ export default function App() {
         <div className="orb orb2"/>
       </div>
       <div className="landing-content">
-        <div className="landing-logo">
-          <div className="logo-hex"/>
-          <div className="logo-text" style={{userSelect:'none',WebkitUserSelect:'none',letterSpacing:'-.08em'}}>
-           <span style={{color:'#e8f5ee'}}>abs</span>
-<span style={{color:'#00FF85'}}>.</span>
-<span style={{color:'#e8f5ee'}}>mail</span>
-<span style={{color:'#00FF85'}}>.</span>
-<span style={{color:'#e8f5ee'}}>xyz</span>
-          </div>
+        <div className="logo-text" style={{userSelect:'none',WebkitUserSelect:'none',fontWeight:700,fontSize:'22px',marginBottom:'28px',letterSpacing:'-.01em'}}>
+          <span style={{color:'#e8f5ee'}}>abs</span><span style={{color:'var(--abs-green)'}}>.</span><span style={{color:'#e8f5ee'}}>mail</span><span style={{color:'var(--abs-green)'}}>.</span><span style={{color:'#e8f5ee'}}>xyz</span>
         </div>
-        <div className="chain-badge"><div className="chain-dot"/>ABSTRACT CHAIN · MAINNET</div>
-        <h1 className="landing-h1">Web3 Mail on<br/><span>Abstract Chain</span></h1>
-        <p className="landing-sub">Send encrypted on-chain messages. Every mail is a real transaction on Abstract. Your inbox lives on the blockchain — forever.</p>
+        <div className="chain-badge"><div className="chain-dot"/>ABSTRACT CHAIN</div>
+        <h1 className="landing-h1">Own your inbox.<br/><span>On-chain, forever.</span></h1>
+        <p className="landing-sub">Encrypted messaging built on Abstract. Every message is a transaction — no servers, no middlemen, no censorship.</p>
         <button className="btn-connect" onClick={handleConnect} disabled={connecting}>
           {connecting
             ? <><div style={{width:'16px',height:'16px',border:'2px solid rgba(0,0,0,.3)',borderTopColor:'#080c0a',borderRadius:'50%',animation:'spin .8s linear infinite'}}/>Connecting...</>
-            : <><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 21V5a2 2 0 00-2-2h-4a2 2 0 00-2 2v16"/></svg>Sign in with Abstract AGW</>
+            : <><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>Sign in with AGW</>
           }
         </button>
-        <div className="landing-features">
-          {[
-            [<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/></svg>,'On-Chain'],
-            [<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>,'Encrypted'],
-            [<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>,'Sovereign'],
-            [<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/></svg>,'Decentralized'],
-          ].map(([icon,l])=>(
-            <div className="feat" key={l}>
-              <span className="feat-icon" style={{color:'var(--abs-green)'}}>{icon}</span>
-              <span className="feat-label">{l}</span>
-            </div>
-          ))}
-        </div>
       </div>
     </div>
   )
