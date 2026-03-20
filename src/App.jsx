@@ -62,17 +62,14 @@ function ToField({ value, onChange }) {
       setLoading(true)
       try {
         const endpoint = isAddress
-          ? `https://auth.privy.io/api/v1/users/address/${value}`
-          : `https://auth.privy.io/api/v1/users/username/${value}`
-        const res = await fetch(endpoint, { headers: { 'privy-app-id': PRIVY_APP_ID, 'Content-Type': 'application/json' } })
+          ? `/api/resolve?address=${value}`
+          : `/api/resolve?username=${value}`
+        const res = await fetch(endpoint)
         if (res.ok) {
           const data = await res.json()
-          const wallet = data.linked_accounts?.find(a => a.type === 'wallet' || a.type === 'smart_wallet')
-          const uname = data.linked_accounts?.find(a => a.type === 'username')
-          const avatar = data.linked_accounts?.find(a => a.profile_picture_url)?.profile_picture_url || null
-          const addr = wallet?.address || (isAddress ? value : null)
-          const name = uname?.username || (isName ? value : null)
-          setInfo({ name, addr, avatar, found: true, portalUrl: `https://portal.abs.xyz/profile/${name||addr||value}`, scanUrl: addr ? `https://abscan.org/address/${addr}` : null })
+          setInfo({ name: data.username, addr: data.address, avatar: data.avatar, found: true,
+            portalUrl: `https://portal.abs.xyz/profile/${data.username||data.address||value}`,
+            scanUrl: data.address ? `https://abscan.org/address/${data.address}` : null })
         } else {
           setInfo({ name: isName?value:null, addr: isAddress?value:null, avatar:null, found:false, portalUrl:`https://portal.abs.xyz/profile/${value}`, scanUrl: isAddress?`https://abscan.org/address/${value}`:null })
         }
@@ -214,13 +211,10 @@ export default function App() {
   // ── User profile ───────────────────────────────────────────────────────────
   useEffect(() => {
     if (!address) return
-    fetch(`https://auth.privy.io/api/v1/users/address/${address}`, {
-      headers: { 'privy-app-id': PRIVY_APP_ID, 'Content-Type': 'application/json' }
-    }).then(r=>r.json()).then(data=>{
-      const uname = data.linked_accounts?.find(a=>a.type==='username')
-      const avatar = data.linked_accounts?.find(a=>a.profile_picture_url)?.profile_picture_url||null
-      setUserProfile({name:uname?.username||null, avatar})
-    }).catch(()=>{})
+    fetch(`/api/resolve?address=${address}`)
+      .then(r => r.json())
+      .then(data => setUserProfile({name: data.username||null, avatar: data.avatar||null}))
+      .catch(() => {})
   }, [address])
 
   // ── Logout dropdown close ──────────────────────────────────────────────────
@@ -295,11 +289,10 @@ export default function App() {
       // Resolve username to address
       if (!to.startsWith('0x')) {
         try {
-          const res = await fetch(`https://auth.privy.io/api/v1/users/username/${to}`, { headers:{'privy-app-id':PRIVY_APP_ID,'Content-Type':'application/json'} })
+          const res = await fetch(`/api/resolve?username=${to}`)
           if (res.ok) {
             const data = await res.json()
-            const wallet = data.linked_accounts?.find(a=>a.type==='wallet'||a.type==='smart_wallet')
-            if (wallet?.address) toAddr = wallet.address
+            if (data.address) toAddr = data.address
           }
         } catch {}
       }
@@ -402,11 +395,6 @@ export default function App() {
           <span style={{color:'var(--abs-green)',fontWeight:700,fontSize:'15px'}}>.</span>
           <span style={{color:'var(--text-primary)',fontWeight:700,fontSize:'15px'}}>mail</span>
         </div>
-        <div className="topbar-search">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-          <input placeholder="Search messages..." value={search} onChange={e=>setSearch(e.target.value)}/>
-          {search && <button onClick={()=>setSearch('')} style={{background:'none',border:'none',cursor:'pointer',color:'var(--text-muted)',display:'flex',padding:0}}><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>}
-        </div>
         <div className="topbar-right">
           <div style={{position:'relative'}}>
             <div className="wallet-pill" onClick={()=>setShowLogout(s=>!s)}>
@@ -474,6 +462,11 @@ export default function App() {
         <div className="maillist">
           <div className="maillist-header">
             <div className="maillist-title">{{inbox:'Inbox',sent:'Sent',starred:'Starred',drafts:'Drafts',trash:'Trash',transactions:'Transactions'}[view]||view}</div>
+            <div className="maillist-search">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+              <input placeholder="Search..." value={search} onChange={e=>setSearch(e.target.value)}/>
+              {search && <button onClick={()=>setSearch('')} style={{background:'none',border:'none',cursor:'pointer',color:'var(--text-muted)',display:'flex',padding:0}}><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>}
+            </div>
             <div className="maillist-tabs">
               {['all','unread'].map(t=>(
                 <button key={t} className={`mail-tab ${tab===t?'active':''}`} onClick={()=>setTab(t)}>{t==='all'?'All':'Unread'}</button>
@@ -490,9 +483,13 @@ export default function App() {
                 <div className="mail-item-top">
                   <div className="mail-avatar-sm">{m.fromAvatar?<img src={m.fromAvatar} alt="" style={{width:'100%',height:'100%',objectFit:'cover',borderRadius:'50%'}}/>:m.fromInitials}</div>
                   <div className="mail-from">{m.fromShort||shortAddr(m.from)}</div>
-                  <div className="mail-time">{m.time}</div>
+                  {m.unread && <div className="mail-unread-dot"/>}
                 </div>
                 <div className="mail-subject">{m.subject}</div>
+                <div className="mail-addr-row">
+                  <span className="mail-addr-short">{shortAddr(m.from)}</span>
+                  <span className="mail-time">{m.time}</span>
+                </div>
                 <div className="mail-preview">{m.preview}</div>
                 <div className="mail-tags">
                   {m.encrypted&&<span className="mail-tag" style={{display:'flex',alignItems:'center',gap:'3px'}}><svg width="7" height="7" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>enc</span>}
