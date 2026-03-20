@@ -521,7 +521,8 @@ export default function App() {
         <div className="sidebar">
           <div className="sidebar-inner">
             <button className="btn-compose" onClick={()=>{setReplyTo('');setComposing(true)}}>
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>Compose
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+              Compose
             </button>
             <div className="sidebar-section">
               <div className="sidebar-section-label">Mail</div>
@@ -533,17 +534,16 @@ export default function App() {
             </div>
             <div className="sidebar-divider"/>
             <div className="sidebar-section">
-              <div className="sidebar-section-label">Chain</div>
-              <button className={`nav-item ${view==='transactions'?'active':''}`} onClick={()=>{setView('transactions');setSelectedId(null)}}>
-                <span className="nav-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/></svg></span>Transactions
+              <div className="sidebar-section-label">People</div>
+              <button className={`nav-item ${view==='contacts'?'active':''}`} onClick={()=>{setView('contacts');setSelectedId(null)}}>
+                <span className="nav-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg></span>Contacts
               </button>
             </div>
             <div className="sidebar-divider"/>
-            <div className="chain-info">
-              <div className="chain-info-label">Network</div>
-              <div className="chain-info-row">
-                <div className="chain-info-name"><div className="chain-live"/>Abstract</div>
-                <div className="chain-block">#{block.toLocaleString()}</div>
+            <div className="s-chain">
+              <div className="s-built">
+                <img src="https://abstract-assets.abs.xyz/assets/images/login/abs-logo-green.png" alt="Abstract"/>
+                <span>Built on Abstract by <a href="https://x.com/skarxbt" target="_blank" rel="noreferrer">skarxbt</a></span>
               </div>
             </div>
           </div>
@@ -551,11 +551,11 @@ export default function App() {
 
         <div className="maillist">
           <div className="maillist-header">
-            <div className="maillist-title">{{inbox:'Inbox',sent:'Sent',starred:'Starred',drafts:'Drafts',trash:'Trash',transactions:'Transactions'}[view]||view}</div>
+            <div className="maillist-title">{{inbox:'Inbox',sent:'Sent',starred:'Starred',drafts:'Drafts',trash:'Trash',transactions:'Transactions',contacts:'Contacts'}[view]||view}</div>
             <div className="maillist-search">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-              <input placeholder="Search..." value={search} onChange={e=>setSearch(e.target.value)}/>
-              {search && <button onClick={()=>setSearch('')} style={{background:'none',border:'none',cursor:'pointer',color:'var(--text-muted)',display:'flex',padding:0}}><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>}
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="var(--tm)" strokeWidth="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+              <input placeholder="Search messages..." value={search} onChange={e=>setSearch(e.target.value)}/>
+              {search && <button onClick={()=>setSearch('')} style={{background:'none',border:'none',cursor:'pointer',color:'var(--tm)',display:'flex',padding:0}}><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>}
             </div>
             <div className="maillist-tabs">
               {['all','unread'].map(t=>(
