@@ -318,10 +318,12 @@ export default function App() {
       const uniqueAddrs = [...new Set([...inboxRows, ...sentRows].map(m => m.from).filter(Boolean))]
       uniqueAddrs.forEach(addr => {
         fetch(`/api/resolve?address=${addr}`).then(r => r.json()).then(data => {
-          if (data.username || data.avatar) {
-            setProfiles(prev => ({...prev, [addr.toLowerCase()]: {name: data.username||null, avatar: data.avatar||null}}))
-          }
-        }).catch(()=>{})
+          const avatar = data.avatar || `https://source.boringavatars.com/beam/40/${addr}?colors=00FF85,0d1410,111a14,00cc6a,080c0a`
+          setProfiles(prev => ({...prev, [addr.toLowerCase()]: {name: data.username||null, avatar}}))
+        }).catch(()=>{
+          const avatar = `https://source.boringavatars.com/beam/40/${addr}?colors=00FF85,0d1410,111a14,00cc6a,080c0a`
+          setProfiles(prev => ({...prev, [addr.toLowerCase()]: {name: null, avatar}}))
+        })
       })
     } catch(e) { console.error('loadFromDB:', e) }
     finally { setLoading(false) }
@@ -334,14 +336,16 @@ export default function App() {
       .then(r => r.json())
       .then(data => {
         const name = data.username || null
-        const avatar = data.avatar || null
+        const avatar = data.avatar || `https://source.boringavatars.com/beam/40/${address}?colors=00FF85,0d1410,111a14,00cc6a,080c0a`
         setUserProfile({ name, avatar })
         setProfiles(prev => ({...prev, [address.toLowerCase()]: {name, avatar}}))
-        if (name || avatar) {
-          sb.from('users').upsert({ wallet_address: address.toLowerCase(), username: name, avatar_url: avatar, updated_at: new Date().toISOString() }, { onConflict: 'wallet_address' }).catch(() => {})
-        }
+        sb.from('users').upsert({ wallet_address: address.toLowerCase(), username: name, avatar_url: avatar, updated_at: new Date().toISOString() }, { onConflict: 'wallet_address' }).catch(() => {})
       })
-      .catch(() => {})
+      .catch(() => {
+        const avatar = `https://source.boringavatars.com/beam/40/${address}?colors=00FF85,0d1410,111a14,00cc6a,080c0a`
+        setUserProfile({ name: null, avatar })
+        setProfiles(prev => ({...prev, [address.toLowerCase()]: {name: null, avatar}}))
+      })
   }, [address])
 
   // ── Logout dropdown close ──────────────────────────────────────────────────
