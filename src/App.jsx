@@ -336,7 +336,11 @@ export default function App() {
         <div className="landing-logo">
           <div className="logo-hex"/>
           <div className="logo-text" style={{userSelect:'none',WebkitUserSelect:'none',letterSpacing:'-.08em'}}>
-            <span>abs</span><span style={{color:'var(--abs-green)'}}>.</span><span>mail</span>
+           <span style={{color:'#e8f5ee'}}>abs</span>
+<span style={{color:'#00FF85'}}>.</span>
+<span style={{color:'#e8f5ee'}}>mail</span>
+<span style={{color:'#00FF85'}}>.</span>
+<span style={{color:'#e8f5ee'}}>xyz</span>
           </div>
         </div>
         <div className="chain-badge"><div className="chain-dot"/>ABSTRACT CHAIN · MAINNET</div>
