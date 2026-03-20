@@ -464,6 +464,9 @@ export default function App() {
         streamRef.current = stream
         for await (const msg of stream) {
           const mail = msgToMail(msg, address)
+          // Always cache to Supabase — both sent and received
+          sbCacheMessage(address, mail).catch(() => {})
+          sbUpsertMeta(address, mail.id, { unread: !mail.isSent, starred: false }).catch(() => {})
           if (mail.isSent) {
             setXmtpSent(p => [mail, ...p.filter(m => m.id !== mail.id)])
           } else {
@@ -561,10 +564,10 @@ export default function App() {
       await delay(600); setStep(2)
       const payload = JSON.stringify({ subject, body, ts: Date.now() })
       let txHash = null
+      let toAddr = to
 
       if (xmtpClient) {
-        // Resolve address — if username, get address first
-        let toAddr = to
+        // Resolve username to address if needed
         if (!to.startsWith('0x')) {
           try {
             const res = await fetch(`https://auth.privy.io/api/v1/users/username/${to}`, {
@@ -578,14 +581,14 @@ export default function App() {
           } catch {}
         }
         setStep(3)
-        // Check if recipient is on XMTP
-        const canMessage = await Client.canMessage([{ identifier: toAddr.toLowerCase(), identifierKind: IdentifierKind.Ethereum }])
-        if (canMessage?.get(toAddr.toLowerCase())) {
-          const convo = await xmtpClient.conversations.newDm(toAddr)
-          await convo.send(payload)
-        } else {
-          console.warn('Recipient not on XMTP, sending via chain tx only')
-        }
+        // Send via XMTP
+        try {
+          const canMessage = await Client.canMessage([{ identifier: toAddr.toLowerCase(), identifierKind: IdentifierKind.Ethereum }])
+          if (canMessage?.get(toAddr.toLowerCase())) {
+            const convo = await xmtpClient.conversations.newDm(toAddr)
+            await convo.send(payload)
+          }
+        } catch (e) { console.warn('XMTP send error:', e) }
       }
 
       // Also send as Abstract Chain tx for permanence
@@ -598,8 +601,9 @@ export default function App() {
       }
 
       setStep(4); await delay(700)
+      const msgId = 'sent-' + Date.now()
       const m = {
-        id: 'sent-' + Date.now(),
+        id: msgId,
         from: address || 'you',
         fromShort: userProfile.name || shortAddr(address) || 'you',
         fromInitials: 'ME',
@@ -609,11 +613,16 @@ export default function App() {
         date: 'Today', txHash,
         encrypted: true, unread: false, starred: false,
         tags: [], permanent: false, xmtp: true, isSent: true,
+        to: toAddr,
       }
       setXmtpSent(p => [m, ...p])
-      // Persist to Supabase
+      // Save sender's copy to Supabase
       sbCacheMessage(address, m).catch(() => {})
       sbUpsertMeta(address, m.id, { unread: false, starred: false }).catch(() => {})
+      // Save recipient's inbox copy to Supabase (so they see it on login)
+      const recipientCopy = { ...m, id: 'recv-' + msgId, isSent: false, unread: true }
+      sbCacheMessage(toAddr, recipientCopy).catch(() => {})
+      sbUpsertMeta(toAddr, recipientCopy.id, { unread: true, starred: false }).catch(() => {})
       setView('sent'); setSelectedId(m.id); setStep(0)
       setToast({ show: true, hash: txHash || '' })
       setTimeout(() => setToast(t => ({ ...t, show: false })), 5000)
