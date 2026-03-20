@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useLoginWithAbstract, useAbstractClient } from '@abstract-foundation/agw-react'
 import { useAccount } from 'wagmi'
 import { createClient } from '@supabase/supabase-js'
+// v2.1
 
 const PRIVY_APP_ID = 'clpispdty00yfmi08jf7pi18p'
 const SUPABASE_URL = 'https://ezpfolazaxdzenvgnait.supabase.co'
