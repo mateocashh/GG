@@ -22,11 +22,12 @@ async function sbGetMeta(wallet, messageId) {
 }
 
 async function sbUpsertMeta(wallet, messageId, updates) {
-  await supabase.from('message_meta').upsert({
+  const { error } = await supabase.from('message_meta').upsert({
     wallet_address: wallet.toLowerCase(),
     message_id: messageId,
     ...updates,
   }, { onConflict: 'wallet_address,message_id' })
+  if (error) console.error('sbUpsertMeta error:', JSON.stringify(error))
 }
 
 async function sbLoadAllMeta(wallet) {
@@ -38,7 +39,7 @@ async function sbLoadAllMeta(wallet) {
 }
 
 async function sbCacheMessage(wallet, mail) {
-  await supabase.from('cached_messages').upsert({
+  const { error } = await supabase.from('cached_messages').upsert({
     wallet_address: wallet.toLowerCase(),
     message_id: mail.id,
     from_address: mail.from,
@@ -51,6 +52,8 @@ async function sbCacheMessage(wallet, mail) {
     is_xmtp: mail.xmtp || false,
     conversation_id: mail.conversationId || null,
   }, { onConflict: 'wallet_address,message_id' })
+  if (error) console.error('sbCacheMessage error:', JSON.stringify(error))
+  else console.log('sbCacheMessage saved:', mail.id)
 }
 
 async function sbLoadCachedMessages(wallet) {
