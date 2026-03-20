@@ -52,12 +52,16 @@ function ToField({ value, onChange }) {
   const [info, setInfo] = useState(null)
   const [loading, setLoading] = useState(false)
   const [focused, setFocused] = useState(false)
+  const [selected, setSelected] = useState(false)
 
   useEffect(() => {
+    // Reset selected state when value changes manually
+    setSelected(false)
     setInfo(null)
     if (!value || value.length < 2) return
+    // Don't search if already a full address
+    if (value.startsWith('0x') && value.length === 42) return
     const isAddress = value.startsWith('0x') && value.length >= 10
-    const isName = !value.startsWith('0x')
     const timer = setTimeout(async () => {
       setLoading(true)
       try {
@@ -67,33 +71,75 @@ function ToField({ value, onChange }) {
         const res = await fetch(endpoint)
         if (res.ok) {
           const data = await res.json()
-          setInfo({ name: data.username, addr: data.address, avatar: data.avatar, found: true,
-            portalUrl: `https://portal.abs.xyz/profile/${data.username||data.address||value}`,
-            scanUrl: data.address ? `https://abscan.org/address/${data.address}` : null })
+          if (data.address || data.username) {
+            setInfo({ name: data.username, addr: data.address, avatar: data.avatar, found: true })
+          } else {
+            setInfo(null)
+          }
         } else {
-          setInfo({ name: isName?value:null, addr: isAddress?value:null, avatar:null, found:false, portalUrl:`https://portal.abs.xyz/profile/${value}`, scanUrl: isAddress?`https://abscan.org/address/${value}`:null })
+          setInfo(null)
         }
       } catch {
-        setInfo({ found:false, portalUrl:`https://portal.abs.xyz/profile/${value}` })
+        setInfo(null)
       } finally { setLoading(false) }
     }, 500)
     return () => clearTimeout(timer)
   }, [value])
 
+  const handleSelect = (e) => {
+    e.preventDefault()
+    if (info?.addr) {
+      onChange(info.addr)
+      setSelected(true)
+      setFocused(false)
+      setInfo(null)
+    }
+  }
+
+  const show = focused && !selected && (loading || info)
   const initials = value.startsWith('0x') ? value.slice(2,4).toUpperCase() : value.slice(0,2).toUpperCase()
-  const show = focused && (loading || info)
+
   return (
     <div className="to-field-wrap">
-      <input value={value} onChange={e=>{onChange(e.target.value);setInfo(null)}} onFocus={()=>setFocused(true)} onBlur={()=>setTimeout(()=>{setFocused(false);setInfo(null)},200)} placeholder="0x address or portal username..."/>
-      {show && loading && <div className="to-dropdown"><div style={{display:'flex',alignItems:'center',gap:'8px',padding:'12px 14px',fontSize:'.78rem',color:'var(--text-muted)',fontFamily:'var(--font-mono)'}}><div style={{width:'7px',height:'7px',borderRadius:'50%',background:'var(--abs-green)',animation:'blink .8s infinite'}}/>Looking up on Abstract...</div></div>}
+      <div style={{display:'flex',alignItems:'center',gap:'6px',flex:1}}>
+        {selected && info?.avatar && (
+          <img src={info.avatar} alt="" style={{width:'18px',height:'18px',borderRadius:'50%',flexShrink:0,objectFit:'cover'}}/>
+        )}
+        <input
+          value={value}
+          onChange={e => { onChange(e.target.value); setSelected(false) }}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setTimeout(() => setFocused(false), 150)}
+          placeholder="0x address or abstract username..."
+          style={{flex:1}}
+        />
+      </div>
+      {show && loading && (
+        <div className="to-dropdown">
+          <div style={{display:'flex',alignItems:'center',gap:'8px',padding:'12px 14px',fontSize:'.78rem',color:'var(--text-muted)',fontFamily:'var(--font-mono)'}}>
+            <div style={{width:'7px',height:'7px',borderRadius:'50%',background:'var(--abs-green)',animation:'blink .8s infinite'}}/>
+            Looking up on Abstract...
+          </div>
+        </div>
+      )}
       {show && info && !loading && (
         <div className="to-dropdown">
-          {info.found && <div style={{padding:'3px 14px',background:'rgba(0,255,133,.06)',borderBottom:'1px solid var(--border)',fontSize:'.62rem',color:'var(--abs-green)',fontFamily:'var(--font-mono)',letterSpacing:'.06em'}}>✦ ABSTRACT USER FOUND</div>}
-          <a href={info.portalUrl} target="_blank" rel="noreferrer" className="to-dropdown-row">
-            <div className="to-avatar">{info.avatar?<img src={info.avatar} alt="" style={{width:'100%',height:'100%',objectFit:'cover',borderRadius:'50%'}}/>:<span style={{fontSize:'.7rem',fontWeight:'700',color:'var(--abs-green)',fontFamily:'var(--font-mono)'}}>{initials}</span>}</div>
-            <div style={{flex:1,minWidth:0}}><div style={{fontSize:'.85rem',fontWeight:'600',color:'var(--text-primary)',marginBottom:'2px'}}>{info.name||value}</div><div style={{fontSize:'.7rem',color:'var(--text-secondary)',fontFamily:'var(--font-mono)'}}>{info.addr?shortAddr(info.addr)+' · ':''}View on Abstract Portal ↗</div></div>
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--abs-green)" strokeWidth="2"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-          </a>
+          <div style={{padding:'3px 14px',background:'rgba(0,255,133,.06)',borderBottom:'1px solid var(--border)',fontSize:'.62rem',color:'var(--abs-green)',fontFamily:'var(--font-mono)',letterSpacing:'.06em'}}>
+            ✦ ABSTRACT USER FOUND
+          </div>
+          <div className="to-dropdown-row" onMouseDown={handleSelect} style={{cursor:'pointer'}}>
+            <div className="to-avatar">
+              {info.avatar
+                ? <img src={info.avatar} alt="" style={{width:'100%',height:'100%',objectFit:'cover',borderRadius:'50%'}}/>
+                : <span style={{fontSize:'.7rem',fontWeight:'700',color:'var(--abs-green)',fontFamily:'var(--font-mono)'}}>{initials}</span>
+              }
+            </div>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{fontSize:'.85rem',fontWeight:'600',color:'var(--text-primary)',marginBottom:'2px'}}>{info.name||value}</div>
+              <div style={{fontSize:'.7rem',color:'var(--text-secondary)',fontFamily:'var(--font-mono)'}}>{info.addr ? shortAddr(info.addr) : ''} · Abstract Portal</div>
+            </div>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--abs-green)" strokeWidth="2"><polyline points="20 6 9 17 4 12"/></svg>
+          </div>
         </div>
       )}
     </div>
