@@ -201,6 +201,36 @@ function ComposeModal({ onClose, onSend, defaultTo='' }) {
   )
 }
 
+// ── MailViewer ────────────────────────────────────────────────────────────────
+function MailViewer({ selected, profiles, onReply, onStar, onDelete }) {
+  const p = profiles[selected.from?.toLowerCase()] || {}
+  const displayName = p.name || selected.fromShort || shortAddr(selected.from)
+  const avatar = p.avatar || selected.fromAvatar
+  return (
+    <div className="mailview-inner">
+      <div className="mail-meta-bar">
+        <div className="mail-avatar-lg">{avatar ? <img src={avatar} alt="" style={{width:'100%',height:'100%',objectFit:'cover',borderRadius:'50%'}}/> : displayName.slice(0,2).toUpperCase()}</div>
+        <div className="mail-meta-details">
+          <div className="mail-from-full">{displayName}</div>
+          <div className="mail-addr">{shortAddr(selected.from)}</div>
+        </div>
+        <div className="mail-date-full">{selected.date}, {selected.time}</div>
+        <div style={{gridColumn:'2/4',gridRow:2,marginTop:'10px',display:'flex',gap:'8px',alignItems:'center',flexWrap:'wrap'}}>
+          {selected.encrypted && <div className="enc-badge"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>End-to-end encrypted</div>}
+          {selected.txHash && <a href={`https://abscan.org/tx/${selected.txHash}`} target="_blank" rel="noreferrer" className="txn-badge"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/></svg>Tx: <strong>{shortAddr(selected.txHash)}</strong></a>}
+          <div style={{marginLeft:'auto',display:'flex',gap:'6px'}}>
+            <button className="action-btn" onClick={()=>onReply(selected.fromShort||selected.from)}><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="9 17 4 12 9 7"/><path d="M20 18v-2a4 4 0 00-4-4H4"/></svg>Reply</button>
+            <button className="action-btn" onClick={onStar}><svg width="11" height="11" viewBox="0 0 24 24" fill={selected.starred?'var(--g)':'none'} stroke="var(--g)" strokeWidth="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>{selected.starred?'Unstar':'Star'}</button>
+            {!selected.permanent && <button className="action-btn" onClick={onDelete}><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a1 1 0 011-1h4a1 1 0 011 1v2"/></svg>Delete</button>}
+          </div>
+        </div>
+      </div>
+      <div className="mail-subject-line">{selected.subject}</div>
+      <div className="mail-body">{selected.body}</div>
+    </div>
+  )
+}
+
 // ── Main App ──────────────────────────────────────────────────────────────────
 export default function App() {
   const { login, logout } = useLoginWithAbstract()
@@ -609,43 +639,7 @@ export default function App() {
         <div className="mailview">
           {!selected ? (
             <div className="mail-empty"><svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" style={{opacity:.2}}><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11L2 12v6a2 2 0 002 2h16a2 2 0 002-2v-6l-3.45-6.89A2 2 0 0016.76 4H7.24a2 2 0 00-1.79 1.11z"/></svg><div className="mail-empty-text">Select a message to read</div></div>
-          ) : (
-            <div className="mailview-inner">
-              {(()=>{
-                const p=profiles[selected.from?.toLowerCase()]||{}
-                const displayName=p.name||selected.fromShort||shortAddr(selected.from)
-                const avatar=p.avatar||selected.fromAvatar
-                return <>
-              <div className="mail-meta-bar">
-                <div className="mail-avatar-lg">{avatar?<img src={avatar} alt="" style={{width:'100%',height:'100%',objectFit:'cover',borderRadius:'50%'}}/>:displayName.slice(0,2).toUpperCase()}</div>
-                <div className="mail-meta-details">
-                  <div className="mail-from-full">{displayName}</div>
-                  <div className="mail-addr">{shortAddr(selected.from)}</div>
-                </div>
-                <div className="mail-date-full">{selected.date}, {selected.time}</div>
-                {!selected.permanent&&<div style={{gridColumn:'2/4',gridRow:2,marginTop:'10px',display:'flex',gap:'8px',alignItems:'center',flexWrap:'wrap'}}>
-                  {selected.encrypted&&<div className="enc-badge"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>End-to-end encrypted</div>}
-                  {selected.txHash&&<a href={`https://abscan.org/tx/${selected.txHash}`} target="_blank" rel="noreferrer" className="txn-badge"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/></svg>Tx: <strong>{shortAddr(selected.txHash)}</strong></a>}
-                  <div style={{marginLeft:'auto',display:'flex',gap:'6px'}}>
-                    <button className="action-btn" onClick={()=>{setReplyTo(selected.fromShort||selected.from);setComposing(true)}}><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="9 17 4 12 9 7"/><path d="M20 18v-2a4 4 0 00-4-4H4"/></svg>Reply</button>
-                    <button className="action-btn" onClick={()=>toggleStar(selected.id)}><svg width="11" height="11" viewBox="0 0 24 24" fill={selected.starred?'var(--g)':'none'} stroke="var(--g)" strokeWidth="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>{selected.starred?'Unstar':'Star'}</button>
-                    <button className="action-btn" onClick={()=>deleteMail(selected.id)}><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a1 1 0 011-1h4a1 1 0 011 1v2"/></svg>Delete</button>
-                  </div>
-                </div>}
-                {selected.permanent&&<div style={{gridColumn:'2/4',gridRow:2,marginTop:'10px',display:'flex',gap:'8px',alignItems:'center',flexWrap:'wrap'}}>
-                  {selected.encrypted&&<div className="enc-badge"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>End-to-end encrypted</div>}
-                  <div style={{marginLeft:'auto',display:'flex',gap:'6px'}}>
-                    <button className="action-btn" onClick={()=>{setReplyTo(selected.fromShort||selected.from);setComposing(true)}}><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="9 17 4 12 9 7"/><path d="M20 18v-2a4 4 0 00-4-4H4"/></svg>Reply</button>
-                    <button className="action-btn" onClick={()=>toggleStar(selected.id)}><svg width="11" height="11" viewBox="0 0 24 24" fill={selected.starred?'var(--g)':'none'} stroke="var(--g)" strokeWidth="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>{selected.starred?'Unstar':'Star'}</button>
-                  </div>
-                </div>}
-              </div>
-              <div className="mail-subject-line">{selected.subject}</div>
-              <div className="mail-body">{selected.body}</div>
-              </>
-              })()}
-            </div>
-          )}
+          ) : <MailViewer selected={selected} profiles={profiles} onReply={from=>{setReplyTo(from);setComposing(true)}} onStar={()=>toggleStar(selected.id)} onDelete={()=>deleteMail(selected.id)}/>}
         </div>
       </div>
 
