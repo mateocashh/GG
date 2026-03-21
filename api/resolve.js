@@ -13,41 +13,47 @@ export default async function handler(req, res) {
     'Accept': 'application/json',
   }
 
-  const parseUser = (data) => {
-    const user = data?.user || data
-    return {
-      address: user?.walletAddress || null,
-      username: user?.name || user?.username || null,
-      avatar: user?.overrideProfilePictureUrl || null,
-    }
-  }
-
   try {
-    if (address) {
-      const r = await fetch(`https://backend.portal.abs.xyz/api/user/address/${address}`, { headers })
+    if (address || (username && username.startsWith('0x'))) {
+      const addr = address || username
+      const r = await fetch(`https://backend.portal.abs.xyz/api/user/address/${addr}`, { headers })
       if (r.ok) {
         const data = await r.json()
-        return res.status(200).json(parseUser(data))
+        const user = data?.user || data
+        return res.status(200).json({
+          address: user?.walletAddress || addr,
+          username: user?.name || user?.username || null,
+          avatar: user?.overrideProfilePictureUrl || null,
+          _raw: data
+        })
       }
     }
 
-    if (username) {
-      // Try exact username via streamer endpoint
-      const r = await fetch(`https://backend.portal.abs.xyz/api/streamer/${username}`, { headers })
-      if (r.ok) {
-        const data = await r.json()
-        const user = data?.user || data?.streamer || data
-        if (user?.walletAddress) {
-          return res.status(200).json(parseUser(data))
-        }
-      }
-      // Try address endpoint if username looks like address
-      if (username.startsWith('0x')) {
-        const r2 = await fetch(`https://backend.portal.abs.xyz/api/user/address/${username}`, { headers })
-        if (r2.ok) {
-          const data = await r2.json()
-          return res.status(200).json(parseUser(data))
-        }
+    if (username && !username.startsWith('0x')) {
+      // Try multiple username endpoints
+      const endpoints = [
+        `https://backend.portal.abs.xyz/api/user/username/${username}`,
+        `https://backend.portal.abs.xyz/api/streamer/${username}`,
+        `https://backend.portal.abs.xyz/api/user/name/${username}`,
+        `https://backend.portal.abs.xyz/api/search/users?q=${username}`,
+        `https://backend.portal.abs.xyz/api/users/search?query=${username}`,
+      ]
+      for (const url of endpoints) {
+        try {
+          const r = await fetch(url, { headers })
+          if (r.ok) {
+            const data = await r.json()
+            const user = data?.user || data?.streamer || data?.results?.[0] || data
+            if (user?.walletAddress || user?.wallet_address) {
+              return res.status(200).json({
+                address: user.walletAddress || user.wallet_address,
+                username: user.name || user.username || username,
+                avatar: user.overrideProfilePictureUrl || user.avatar_url || null,
+                _source: url
+              })
+            }
+          }
+        } catch {}
       }
     }
 
