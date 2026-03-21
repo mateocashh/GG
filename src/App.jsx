@@ -70,42 +70,41 @@ const FOUNDER_MSG = {
 function ToField({ value, onChange }) {
   const [results, setResults] = useState([])
   const [loading, setLoading] = useState(false)
-  const [focused, setFocused] = useState(false)
-  const [selected, setSelected] = useState(false)
-  const [selectedUser, setSelectedUser] = useState(null)
+  const [open, setOpen] = useState(false)
+  const [selected, setSelected] = useState(null)
 
   useEffect(() => {
-    setSelected(false)
-    setSelectedUser(null)
+    if (selected && selected.address === value) return
+    setSelected(null)
     setResults([])
-    if (!value || value.length < 2) return
-    // If full address typed, no need to search
-    if (value.startsWith('0x') && value.length === 42) return
+    if (!value || value.length < 2) { setOpen(false); return }
+    if (value.startsWith('0x') && value.length === 42) { setOpen(false); return }
 
     const timer = setTimeout(async () => {
       setLoading(true)
+      setOpen(true)
       try {
-        // Search Supabase users table first
+        // Search Supabase users first (fast)
         const isAddr = value.startsWith('0x')
-        const { data } = isAddr
+        const { data: sbUsers } = isAddr
           ? await sb.from('users').select('*').ilike('wallet_address', `%${value}%`).limit(5)
           : await sb.from('users').select('*').ilike('username', `%${value}%`).limit(5)
 
-        if (data && data.length > 0) {
-          setResults(data)
-        } else {
-          // Fallback to proxy API
-          const endpoint = isAddr
-            ? `/api/resolve?address=${value}`
-            : `/api/resolve?username=${value}`
-          const res = await fetch(endpoint)
-          if (res.ok) {
-            const d = await res.json()
-            if (d.address) {
-              setResults([{ wallet_address: d.address, username: d.username, avatar_url: d.avatar }])
-            } else {
-              setResults([])
-            }
+        if (sbUsers && sbUsers.length > 0) {
+          setResults(sbUsers.map(u => ({ address: u.wallet_address, username: u.username, avatar: u.avatar_url })))
+          setLoading(false)
+          return
+        }
+
+        // Fallback: hit Abstract Portal API
+        const endpoint = isAddr
+          ? `/api/resolve?address=${value}`
+          : `/api/resolve?username=${value}`
+        const res = await fetch(endpoint)
+        if (res.ok) {
+          const data = await res.json()
+          if (data.address) {
+            setResults([{ address: data.address, username: data.username, avatar: data.avatar }])
           } else {
             setResults([])
           }
@@ -117,65 +116,71 @@ function ToField({ value, onChange }) {
   }, [value])
 
   const handleSelect = (user) => {
-    onChange(user.wallet_address)
-    setSelected(true)
-    setSelectedUser(user)
-    setFocused(false)
+    setSelected(user)
+    onChange(user.address)
+    setOpen(false)
     setResults([])
+    // Save to Supabase so they appear in future searches
+    if (user.username || user.avatar) {
+      sb.from('users').upsert({ wallet_address: user.address.toLowerCase(), username: user.username, avatar_url: user.avatar, updated_at: new Date().toISOString() }, { onConflict: 'wallet_address' }).catch(()=>{})
+    }
   }
 
-  const show = focused && !selected && (loading || results.length > 0)
+  const handleChange = (e) => {
+    setSelected(null)
+    onChange(e.target.value)
+  }
 
   return (
     <div className="to-field-wrap">
       <div style={{display:'flex',alignItems:'center',gap:'6px',flex:1}}>
-        {selected && selectedUser?.avatar_url && (
-          <img src={selectedUser.avatar_url} alt="" style={{width:'18px',height:'18px',borderRadius:'50%',flexShrink:0,objectFit:'cover',border:'1px solid var(--abs-green-border)'}}/>
+        {selected?.avatar && (
+          <img src={selected.avatar} alt="" style={{width:'18px',height:'18px',borderRadius:'50%',flexShrink:0,objectFit:'cover',border:'1px solid var(--gb)'}}/>
         )}
-        {selected && selectedUser?.username && (
-          <span style={{fontSize:'.75rem',color:'var(--abs-green)',fontFamily:'var(--font-mono)',flexShrink:0}}>{selectedUser.username}</span>
+        {selected?.username && !selected?.avatar && (
+          <div style={{width:'18px',height:'18px',borderRadius:'50%',background:'var(--gp)',border:'1px solid var(--gb)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'8px',color:'var(--g)',fontFamily:'var(--mo)',flexShrink:0,fontWeight:700}}>
+            {selected.username.slice(0,2).toUpperCase()}
+          </div>
         )}
         <input
-          value={value}
-          onChange={e => { onChange(e.target.value); setSelected(false); setSelectedUser(null) }}
-          onFocus={() => setFocused(true)}
-          onBlur={() => setTimeout(() => setFocused(false), 150)}
+          value={selected ? (selected.username || shortAddr(selected.address)) : value}
+          onChange={handleChange}
+          onFocus={() => value && value.length >= 2 && setOpen(true)}
+          onBlur={() => setTimeout(() => setOpen(false), 150)}
           placeholder="0x address or abstract username..."
-          style={{flex:1, display: selected && selectedUser?.username ? 'none' : 'block'}}
+          style={{flex:1, color: selected ? 'var(--g)' : 'var(--tp)'}}
         />
       </div>
-      {show && (
+      {open && (loading || results.length > 0 || value.length >= 2) && (
         <div className="to-dropdown">
           {loading && (
-            <div style={{display:'flex',alignItems:'center',gap:'8px',padding:'10px 14px',fontSize:'.75rem',color:'var(--text-muted)',fontFamily:'var(--font-mono)'}}>
-              <div style={{width:'6px',height:'6px',borderRadius:'50%',background:'var(--abs-green)',animation:'blink .8s infinite'}}/>
-              Searching Abstract users...
+            <div style={{display:'flex',alignItems:'center',gap:'8px',padding:'10px 14px',fontSize:'11px',color:'var(--tm)',fontFamily:'var(--mo)'}}>
+              <div style={{width:'6px',height:'6px',borderRadius:'50%',background:'var(--g)',animation:'blink .8s infinite'}}/>
+              Searching Abstract...
             </div>
           )}
+          {!loading && results.length === 0 && value.length >= 2 && (
+            <div style={{padding:'10px 14px',fontSize:'11px',color:'var(--tm)',fontFamily:'var(--mo)'}}>No users found</div>
+          )}
           {!loading && results.map(user => (
-            <div key={user.wallet_address} className="to-dropdown-row" onMouseDown={() => handleSelect(user)}>
+            <div key={user.address} className="to-dropdown-row" onMouseDown={() => handleSelect(user)}>
               <div className="to-avatar">
-                {user.avatar_url
-                  ? <img src={user.avatar_url} alt="" style={{width:'100%',height:'100%',objectFit:'cover',borderRadius:'50%'}}/>
-                  : <span style={{fontSize:'.7rem',fontWeight:'700',color:'var(--abs-green)',fontFamily:'var(--font-mono)'}}>{(user.username||user.wallet_address).slice(0,2).toUpperCase()}</span>
+                {user.avatar
+                  ? <img src={user.avatar} alt="" style={{width:'100%',height:'100%',objectFit:'cover',borderRadius:'50%'}}/>
+                  : <span style={{fontSize:'9px',fontWeight:'700',color:'var(--g)',fontFamily:'var(--mo)'}}>{(user.username||user.address).slice(0,2).toUpperCase()}</span>
                 }
               </div>
               <div style={{flex:1,minWidth:0}}>
-                <div style={{fontSize:'.85rem',fontWeight:'600',color:'var(--text-primary)',marginBottom:'1px',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
-                  {user.username || shortAddr(user.wallet_address)}
+                <div style={{fontSize:'13px',fontWeight:'600',color:'var(--tp)',marginBottom:'1px',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+                  {user.username || shortAddr(user.address)}
                 </div>
-                <div style={{fontSize:'.68rem',color:'var(--text-secondary)',fontFamily:'var(--font-mono)'}}>
-                  {shortAddr(user.wallet_address)} · Abstract
+                <div style={{fontSize:'10px',color:'var(--ts)',fontFamily:'var(--mo)'}}>
+                  {shortAddr(user.address)} · Abstract
                 </div>
               </div>
-              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--abs-green)" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--g)" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>
             </div>
           ))}
-          {!loading && results.length === 0 && value.length >= 2 && (
-            <div style={{padding:'10px 14px',fontSize:'.75rem',color:'var(--text-muted)',fontFamily:'var(--font-mono)'}}>
-              No Abstract users found
-            </div>
-          )}
         </div>
       )}
     </div>
@@ -431,7 +436,7 @@ export default function App() {
       let txHash = null
       let toAddr = to
 
-      // Resolve username to address
+      // Resolve username to address if needed
       if (!to.startsWith('0x')) {
         try {
           const res = await fetch(`/api/resolve?username=${to}`)
