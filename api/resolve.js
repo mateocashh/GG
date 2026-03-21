@@ -6,50 +6,48 @@ export default async function handler(req, res) {
   const { username, address } = req.query
   if (!address && !username) return res.status(400).json({ error: 'required' })
 
+  const headers = {
+    'Origin': 'https://portal.abs.xyz',
+    'Referer': 'https://portal.abs.xyz/',
+    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36',
+    'Accept': 'application/json',
+  }
+
+  const parseUser = (data) => {
+    const user = data?.user || data
+    return {
+      address: user?.walletAddress || null,
+      username: user?.name || user?.username || null,
+      avatar: user?.overrideProfilePictureUrl || null,
+    }
+  }
+
   try {
-    const url = address
-      ? `https://backend.portal.abs.xyz/api/user/address/${address}`
-      : `https://backend.portal.abs.xyz/api/user/address/${username}`
-
-    const r = await fetch(url, {
-      method: 'GET',
-      headers: {
-        'Origin': 'https://portal.abs.xyz',
-        'Referer': 'https://portal.abs.xyz/',
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'application/json',
+    if (address) {
+      const r = await fetch(`https://backend.portal.abs.xyz/api/user/address/${address}`, { headers })
+      if (r.ok) {
+        const data = await r.json()
+        return res.status(200).json(parseUser(data))
       }
-    })
-
-    if (r.ok) {
-      const data = await r.json()
-      const user = data.user || data
-      const avatar = user.overrideProfilePictureUrl || null
-      return res.status(200).json({
-        address: user.walletAddress || address || null,
-        username: user.name || user.username || null,
-        avatar,
-      })
     }
 
-    // Also try by username path
     if (username) {
-      const r2 = await fetch(`https://backend.portal.abs.xyz/api/streamer/${username}`, {
-        headers: {
-          'Origin': 'https://portal.abs.xyz',
-          'Referer': 'https://portal.abs.xyz/',
-          'User-Agent': 'Mozilla/5.0',
-          'Accept': 'application/json',
+      // Try exact username via streamer endpoint
+      const r = await fetch(`https://backend.portal.abs.xyz/api/streamer/${username}`, { headers })
+      if (r.ok) {
+        const data = await r.json()
+        const user = data?.user || data?.streamer || data
+        if (user?.walletAddress) {
+          return res.status(200).json(parseUser(data))
         }
-      })
-      if (r2.ok) {
-        const data = await r2.json()
-        const user = data.user || data
-        return res.status(200).json({
-          address: user.walletAddress || null,
-          username: user.name || user.username || null,
-          avatar: user.overrideProfilePictureUrl || null,
-        })
+      }
+      // Try address endpoint if username looks like address
+      if (username.startsWith('0x')) {
+        const r2 = await fetch(`https://backend.portal.abs.xyz/api/user/address/${username}`, { headers })
+        if (r2.ok) {
+          const data = await r2.json()
+          return res.status(200).json(parseUser(data))
+        }
       }
     }
 
