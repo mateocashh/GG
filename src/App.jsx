@@ -33,9 +33,9 @@ const shortAddr = a => a ? a.slice(0,6)+'...'+a.slice(-4) : ''
 const randomHex = n => [...Array(n)].map(()=>'0123456789abcdef'[Math.floor(Math.random()*16)]).join('')
 const delay = ms => new Promise(r => setTimeout(r, ms))
 
-// Generate a unique gradient avatar SVG from any wallet address
-function makeAvatar(addr) {
-  if (!addr) return null
+// Generate unique colors from wallet address
+function addrToColors(addr) {
+  if (!addr) return ['#00FF85', '#00cc6a']
   const hex = addr.toLowerCase().replace('0x','')
   const r1 = parseInt(hex.slice(0,2),16)
   const g1 = parseInt(hex.slice(2,4),16)
@@ -43,11 +43,12 @@ function makeAvatar(addr) {
   const r2 = parseInt(hex.slice(6,8),16)
   const g2 = parseInt(hex.slice(8,10),16)
   const b2 = parseInt(hex.slice(10,12),16)
-  // Tint toward abs green
-  const c1 = `rgb(${Math.round(r1*0.4+0)},${Math.round(g1*0.4+160)},${Math.round(b1*0.4+60)})`
-  const c2 = `rgb(${Math.round(r2*0.5)},${Math.round(g2*0.3+80)},${Math.round(b2*0.4+40)})`
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 40 40"><defs><linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="${c1}"/><stop offset="100%" stop-color="${c2}"/></linearGradient></defs><circle cx="20" cy="20" r="20" fill="url(#g)"/></svg>`
-  return `data:image/svg+xml;base64,${btoa(svg)}`
+  const c1 = `rgb(${Math.round(r1*0.3)},${Math.round(g1*0.4+100)},${Math.round(b1*0.3+60)})`
+  const c2 = `rgb(${Math.round(r2*0.4+10)},${Math.round(g2*0.2+60)},${Math.round(b2*0.3+30)})`
+  return [c1, c2]
+}
+function makeAvatar(addr) {
+  return null // use CSS gradient instead, not img
 }
 
 const FOUNDER_MSG = {
@@ -227,7 +228,7 @@ function MailViewer({ selected, profiles, onReply, onStar, onDelete }) {
   return (
     <div className="mailview-inner">
       <div className="mail-meta-bar">
-        <div className="mail-avatar-lg">{avatar ? <img src={avatar} alt="" style={{width:'100%',height:'100%',objectFit:'cover',borderRadius:'50%'}}/> : displayName.slice(0,2).toUpperCase()}</div>
+        <div className="mail-avatar-lg" style={!avatar ? {background:`linear-gradient(135deg,${addrToColors(selected.from)[0]},${addrToColors(selected.from)[1]})`} : {}}>{avatar ? <img src={avatar} alt="" style={{width:'100%',height:'100%',objectFit:'cover',borderRadius:'50%'}}/> : displayName.slice(0,2).toUpperCase()}</div>
         <div className="mail-meta-details">
           <div className="mail-from-full">{displayName}</div>
           <div className="mail-addr">{shortAddr(selected.from)}</div>
@@ -335,12 +336,10 @@ export default function App() {
       const uniqueAddrs = [...new Set([...inboxRows, ...sentRows].map(m => m.from).filter(Boolean))]
       uniqueAddrs.forEach(addr => {
         fetch(`/api/resolve?address=${addr}`).then(r => r.json()).then(data => {
-          const avatar = data.avatar || `https://source.boringavatars.com/beam/40/${addr}?colors=00FF85,0d1410,111a14,00cc6a,080c0a`
-          setProfiles(prev => ({...prev, [addr.toLowerCase()]: {name: data.username||null, avatar}}))
-        }).catch(()=>{
-          const avatar = `https://source.boringavatars.com/beam/40/${addr}?colors=00FF85,0d1410,111a14,00cc6a,080c0a`
-          setProfiles(prev => ({...prev, [addr.toLowerCase()]: {name: null, avatar}}))
-        })
+          if (data.username || data.avatar) {
+            setProfiles(prev => ({...prev, [addr.toLowerCase()]: {name: data.username||null, avatar: data.avatar||null}}))
+          }
+        }).catch(()=>{})
       })
     } catch(e) { console.error('loadFromDB:', e) }
     finally { setLoading(false) }
@@ -349,37 +348,18 @@ export default function App() {
   // ── User profile ───────────────────────────────────────────────────────────
   useEffect(() => {
     if (!address) return
-    const fallbackAvatar = makeAvatar(address)
-
-    // Try to get Privy auth token from localStorage
-    let privyToken = null
-    try {
-      // Privy stores token in localStorage under privy:token key
-      const keys = Object.keys(localStorage)
-      const privyKey = keys.find(k => k.includes('privy') && (k.includes('token') || k.includes('auth')))
-      if (privyKey) privyToken = localStorage.getItem(privyKey)
-      // Also try direct key
-      if (!privyToken) privyToken = localStorage.getItem(`privy:token:${PRIVY_APP_ID}`)
-      if (!privyToken) privyToken = localStorage.getItem('privy:token')
-    } catch {}
-
-    const url = privyToken
-      ? `/api/resolve?address=${address}&token=${encodeURIComponent(privyToken)}`
-      : `/api/resolve?address=${address}`
-
-    fetch(url)
+    fetch(`/api/resolve?address=${address}`)
       .then(r => r.json())
       .then(data => {
         const name = data.username || null
-        const avatar = data.avatar || fallbackAvatar
+        const avatar = data.avatar || null
         setUserProfile({ name, avatar })
         setProfiles(prev => ({...prev, [address.toLowerCase()]: {name, avatar}}))
-        sb.from('users').upsert({ wallet_address: address.toLowerCase(), username: name, avatar_url: data.avatar || null, updated_at: new Date().toISOString() }, { onConflict: 'wallet_address' }).catch(() => {})
+        if (name || avatar) {
+          sb.from('users').upsert({ wallet_address: address.toLowerCase(), username: name, avatar_url: avatar, updated_at: new Date().toISOString() }, { onConflict: 'wallet_address' }).catch(() => {})
+        }
       })
-      .catch(() => {
-        setUserProfile({ name: null, avatar: fallbackAvatar })
-        setProfiles(prev => ({...prev, [address.toLowerCase()]: {name: null, avatar: fallbackAvatar}}))
-      })
+      .catch(() => {})
   }, [address])
 
   // ── Logout dropdown close ──────────────────────────────────────────────────
@@ -656,7 +636,7 @@ export default function App() {
               return (
               <div key={m.id} className={`mail-item ${m.unread?'unread':''} ${selectedId===m.id?'active':''}`} style={{animationDelay:`${idx*.04}s`}} onClick={()=>handleSelect(m.id)}>
                 <div className="mail-item-top">
-                  <div className="mail-avatar-sm">{avatar?<img src={avatar} alt="" style={{width:'100%',height:'100%',objectFit:'cover',borderRadius:'50%'}}/>:initials}</div>
+                  <div className="mail-avatar-sm" style={!avatar ? {background:`linear-gradient(135deg,${addrToColors(m.from)[0]},${addrToColors(m.from)[1]})`} : {}}>{avatar?<img src={avatar} alt="" style={{width:'100%',height:'100%',objectFit:'cover',borderRadius:'50%'}}/>:initials}</div>
                   <div className="mail-from">{displayName}</div>
                   {m.unread && <div className="mail-unread-dot"/>}
                 </div>
