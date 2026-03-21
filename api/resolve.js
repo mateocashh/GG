@@ -21,9 +21,9 @@ export default async function handler(req, res) {
         // Extract users from results
         const users = data?.users || data?.results?.users || data?.data?.users || []
         const mapped = users.map(u => ({
-          address: u.walletAddress || u.wallet_address || null,
+          address: u.walletAddress || u.wallet_address || u.address || null,
           username: u.name || u.username || null,
-          avatar: u.overrideProfilePictureUrl || u.avatar_url || null,
+          avatar: u.overrideProfilePictureUrl || u.image || u.avatar_url || null,
         })).filter(u => u.address)
         return res.status(200).json({ results: mapped, _raw: data })
       }
@@ -54,9 +54,9 @@ export default async function handler(req, res) {
         const match = users.find(u => (u.name||u.username||'').toLowerCase() === username.toLowerCase()) || users[0]
         if (match) {
           return res.status(200).json({
-            address: match.walletAddress || match.wallet_address || null,
+            address: match.walletAddress || match.wallet_address || match.address || null,
             username: match.name || match.username || null,
-            avatar: match.overrideProfilePictureUrl || null,
+            avatar: match.overrideProfilePictureUrl || match.image || null,
           })
         }
       }
