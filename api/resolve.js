@@ -4,71 +4,44 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end()
 
   const { username, address } = req.query
-  if (!address && !username) return res.status(400).json({ error: 'address or username required' })
+  if (!address && !username) return res.status(400).json({ error: 'required' })
 
-  try {
-    // Scrape Abstract Portal public profile page
-    const profileUrl = address
-      ? `https://portal.abs.xyz/profile/${address}`
-      : `https://portal.abs.xyz/profile/${username}`
+  const tryFetch = async (url, headers = {}) => {
+    try {
+      const r = await fetch(url, { headers: { 'Content-Type': 'application/json', ...headers } })
+      if (r.ok) return await r.json()
+    } catch {}
+    return null
+  }
 
-    const r = await fetch(profileUrl, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (compatible; absmail/1.0)',
-        'Accept': 'text/html,application/xhtml+xml',
-      }
-    })
+  // Try every known Abstract Portal API pattern
+  const endpoints = address ? [
+    `https://portal.abs.xyz/api/profile/${address}`,
+    `https://portal.abs.xyz/api/users/${address}`,
+    `https://portal.abs.xyz/api/v1/users/${address}`,
+    `https://portal.abs.xyz/api/v1/profile/${address}`,
+    `https://api.portal.abs.xyz/v1/users/${address}`,
+    `https://api.portal.abs.xyz/v1/profile/${address}`,
+    `https://api.abs.xyz/v1/users/${address}`,
+    `https://api.abs.xyz/v1/profile/${address}`,
+    `https://abs.xyz/api/profile/${address}`,
+    `https://abs.xyz/api/users/${address}`,
+  ] : [
+    `https://portal.abs.xyz/api/profile/username/${username}`,
+    `https://portal.abs.xyz/api/users/username/${username}`,
+    `https://api.portal.abs.xyz/v1/users/username/${username}`,
+  ]
 
-    if (r.ok) {
-      const html = await r.text()
-
-      // Extract username from og:title or profile-specific meta tags
-      let name = null
-      let avatar = null
-
-      // Try og:title — Abstract Portal sets it to the username
-      const ogTitle = html.match(/<meta[^>]*property=["']og:title["'][^>]*content=["']([^"']+)["']/i)
-        || html.match(/<meta[^>]*content=["']([^"']+)["'][^>]*property=["']og:title["']/i)
-      if (ogTitle) {
-        const t = ogTitle[1].trim()
-        if (t && !t.toLowerCase().includes('abstract') && t !== 'Profile') name = t
-      }
-
-      // Try og:image for avatar
-      const ogImage = html.match(/<meta[^>]*property=["']og:image["'][^>]*content=["']([^"']+)["']/i)
-        || html.match(/<meta[^>]*content=["']([^"']+)["'][^>]*property=["']og:image["']/i)
-      if (ogImage) {
-        const img = ogImage[1].trim()
-        if (img && !img.includes('default') && !img.includes('favicon')) avatar = img
-      }
-
-      // Try twitter:title as fallback for name
-      if (!name) {
-        const twTitle = html.match(/<meta[^>]*name=["']twitter:title["'][^>]*content=["']([^"']+)["']/i)
-          || html.match(/<meta[^>]*content=["']([^"']+)["'][^>]*name=["']twitter:title["']/i)
-        if (twTitle) {
-          const t = twTitle[1].trim()
-          if (t && !t.toLowerCase().includes('abstract') && t !== 'Profile') name = t
-        }
-      }
-
-      // Try twitter:image as fallback for avatar
-      if (!avatar) {
-        const twImage = html.match(/<meta[^>]*name=["']twitter:image["'][^>]*content=["']([^"']+)["']/i)
-          || html.match(/<meta[^>]*content=["']([^"']+)["'][^>]*name=["']twitter:image["']/i)
-        if (twImage) {
-          const img = twImage[1].trim()
-          if (img && !img.includes('default') && !img.includes('favicon')) avatar = img
-        }
-      }
-
+  for (const url of endpoints) {
+    const data = await tryFetch(url)
+    if (data) {
+      const name = data.username || data.name || data.handle || null
+      const avatar = data.profile_image_url || data.avatar_url || data.pfp || data.image || data.avatar || null
       if (name || avatar) {
-        return res.status(200).json({ address: address || null, username: name, avatar })
+        return res.status(200).json({ address: address || null, username: name, avatar, _source: url })
       }
     }
-
-    return res.status(200).json({ address: address || null, username: null, avatar: null })
-  } catch (e) {
-    return res.status(200).json({ address: address || null, username: null, avatar: null })
   }
+
+  return res.status(200).json({ address: address || null, username: null, avatar: null })
 }
