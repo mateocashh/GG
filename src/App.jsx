@@ -96,14 +96,16 @@ function ToField({ value, onChange }) {
           return
         }
 
-        // Fallback: hit Abstract Portal API
+        // Fallback: hit Abstract Portal global search
         const endpoint = isAddr
           ? `/api/resolve?address=${value}`
-          : `/api/resolve?username=${value}`
+          : `/api/resolve?search=${encodeURIComponent(value)}`
         const res = await fetch(endpoint)
         if (res.ok) {
           const data = await res.json()
-          if (data.address) {
+          if (data.results) {
+            setResults(data.results)
+          } else if (data.address) {
             setResults([{ address: data.address, username: data.username, avatar: data.avatar }])
           } else {
             setResults([])
