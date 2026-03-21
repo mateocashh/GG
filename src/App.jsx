@@ -4,7 +4,7 @@ import { useAccount } from 'wagmi'
 import { createClient } from '@supabase/supabase-js'
 // v2.1
 
-const PRIVY_APP_ID = 'clpispdty00yfmi08jf7pi18p'
+const PRIVY_APP_ID = 'cmmznujzp002w0cl1nkqxv7vd'
 const SUPABASE_URL = 'https://ezpfolazaxdzenvgnait.supabase.co'
 const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImV6cGZvbGF6YXhkemVudmduYWl0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQwMTY2MDEsImV4cCI6MjA4OTU5MjYwMX0.YRur1TQdwKjcZqfdr88ZohFzOyouOuqgiQeGhL6qWHk'
 const sb = createClient(SUPABASE_URL, SUPABASE_ANON)
@@ -32,6 +32,23 @@ async function dbLoadMeta(wallet) {
 const shortAddr = a => a ? a.slice(0,6)+'...'+a.slice(-4) : ''
 const randomHex = n => [...Array(n)].map(()=>'0123456789abcdef'[Math.floor(Math.random()*16)]).join('')
 const delay = ms => new Promise(r => setTimeout(r, ms))
+
+// Generate a unique gradient avatar SVG from any wallet address
+function makeAvatar(addr) {
+  if (!addr) return null
+  const hex = addr.toLowerCase().replace('0x','')
+  const r1 = parseInt(hex.slice(0,2),16)
+  const g1 = parseInt(hex.slice(2,4),16)
+  const b1 = parseInt(hex.slice(4,6),16)
+  const r2 = parseInt(hex.slice(6,8),16)
+  const g2 = parseInt(hex.slice(8,10),16)
+  const b2 = parseInt(hex.slice(10,12),16)
+  // Tint toward abs green
+  const c1 = `rgb(${Math.round(r1*0.4+0)},${Math.round(g1*0.4+160)},${Math.round(b1*0.4+60)})`
+  const c2 = `rgb(${Math.round(r2*0.5)},${Math.round(g2*0.3+80)},${Math.round(b2*0.4+40)})`
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 40 40"><defs><linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="${c1}"/><stop offset="100%" stop-color="${c2}"/></linearGradient></defs><circle cx="20" cy="20" r="20" fill="url(#g)"/></svg>`
+  return `data:image/svg+xml;base64,${btoa(svg)}`
+}
 
 const FOUNDER_MSG = {
   id: 'founder-1',
@@ -332,19 +349,36 @@ export default function App() {
   // ── User profile ───────────────────────────────────────────────────────────
   useEffect(() => {
     if (!address) return
-    fetch(`/api/resolve?address=${address}`)
+    const fallbackAvatar = makeAvatar(address)
+
+    // Try to get Privy auth token from localStorage
+    let privyToken = null
+    try {
+      // Privy stores token in localStorage under privy:token key
+      const keys = Object.keys(localStorage)
+      const privyKey = keys.find(k => k.includes('privy') && (k.includes('token') || k.includes('auth')))
+      if (privyKey) privyToken = localStorage.getItem(privyKey)
+      // Also try direct key
+      if (!privyToken) privyToken = localStorage.getItem(`privy:token:${PRIVY_APP_ID}`)
+      if (!privyToken) privyToken = localStorage.getItem('privy:token')
+    } catch {}
+
+    const url = privyToken
+      ? `/api/resolve?address=${address}&token=${encodeURIComponent(privyToken)}`
+      : `/api/resolve?address=${address}`
+
+    fetch(url)
       .then(r => r.json())
       .then(data => {
         const name = data.username || null
-        const avatar = data.avatar || `https://source.boringavatars.com/beam/40/${address}?colors=00FF85,0d1410,111a14,00cc6a,080c0a`
+        const avatar = data.avatar || fallbackAvatar
         setUserProfile({ name, avatar })
         setProfiles(prev => ({...prev, [address.toLowerCase()]: {name, avatar}}))
-        sb.from('users').upsert({ wallet_address: address.toLowerCase(), username: name, avatar_url: avatar, updated_at: new Date().toISOString() }, { onConflict: 'wallet_address' }).catch(() => {})
+        sb.from('users').upsert({ wallet_address: address.toLowerCase(), username: name, avatar_url: data.avatar || null, updated_at: new Date().toISOString() }, { onConflict: 'wallet_address' }).catch(() => {})
       })
       .catch(() => {
-        const avatar = `https://source.boringavatars.com/beam/40/${address}?colors=00FF85,0d1410,111a14,00cc6a,080c0a`
-        setUserProfile({ name: null, avatar })
-        setProfiles(prev => ({...prev, [address.toLowerCase()]: {name: null, avatar}}))
+        setUserProfile({ name: null, avatar: fallbackAvatar })
+        setProfiles(prev => ({...prev, [address.toLowerCase()]: {name: null, avatar: fallbackAvatar}}))
       })
   }, [address])
 
