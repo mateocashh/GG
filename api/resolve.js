@@ -3,8 +3,7 @@ export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS')
   if (req.method === 'OPTIONS') return res.status(200).end()
 
-  const { username, address } = req.query
-  if (!address && !username) return res.status(400).json({ error: 'required' })
+  const { username, address, search } = req.query
 
   const headers = {
     'Origin': 'https://portal.abs.xyz',
@@ -14,6 +13,24 @@ export default async function handler(req, res) {
   }
 
   try {
+    // Search mode — returns array of users
+    if (search) {
+      const r = await fetch(`https://backend.portal.abs.xyz/api/search/global?query=${encodeURIComponent(search)}`, { headers })
+      if (r.ok) {
+        const data = await r.json()
+        // Extract users from results
+        const users = data?.users || data?.results?.users || data?.data?.users || []
+        const mapped = users.map(u => ({
+          address: u.walletAddress || u.wallet_address || null,
+          username: u.name || u.username || null,
+          avatar: u.overrideProfilePictureUrl || u.avatar_url || null,
+        })).filter(u => u.address)
+        return res.status(200).json({ results: mapped, _raw: data })
+      }
+      return res.status(200).json({ results: [] })
+    }
+
+    // Address lookup
     if (address || (username && username.startsWith('0x'))) {
       const addr = address || username
       const r = await fetch(`https://backend.portal.abs.xyz/api/user/address/${addr}`, { headers })
@@ -24,36 +41,24 @@ export default async function handler(req, res) {
           address: user?.walletAddress || addr,
           username: user?.name || user?.username || null,
           avatar: user?.overrideProfilePictureUrl || null,
-          _raw: data
         })
       }
     }
 
+    // Username search via global search
     if (username && !username.startsWith('0x')) {
-      // Try multiple username endpoints
-      const endpoints = [
-        `https://backend.portal.abs.xyz/api/user/username/${username}`,
-        `https://backend.portal.abs.xyz/api/streamer/${username}`,
-        `https://backend.portal.abs.xyz/api/user/name/${username}`,
-        `https://backend.portal.abs.xyz/api/search/users?q=${username}`,
-        `https://backend.portal.abs.xyz/api/users/search?query=${username}`,
-      ]
-      for (const url of endpoints) {
-        try {
-          const r = await fetch(url, { headers })
-          if (r.ok) {
-            const data = await r.json()
-            const user = data?.user || data?.streamer || data?.results?.[0] || data
-            if (user?.walletAddress || user?.wallet_address) {
-              return res.status(200).json({
-                address: user.walletAddress || user.wallet_address,
-                username: user.name || user.username || username,
-                avatar: user.overrideProfilePictureUrl || user.avatar_url || null,
-                _source: url
-              })
-            }
-          }
-        } catch {}
+      const r = await fetch(`https://backend.portal.abs.xyz/api/search/global?query=${encodeURIComponent(username)}`, { headers })
+      if (r.ok) {
+        const data = await r.json()
+        const users = data?.users || data?.results?.users || data?.data?.users || []
+        const match = users.find(u => (u.name||u.username||'').toLowerCase() === username.toLowerCase()) || users[0]
+        if (match) {
+          return res.status(200).json({
+            address: match.walletAddress || match.wallet_address || null,
+            username: match.name || match.username || null,
+            avatar: match.overrideProfilePictureUrl || null,
+          })
+        }
       }
     }
 
